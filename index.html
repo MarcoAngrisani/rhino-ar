@@ -13,7 +13,7 @@
   --ok: #1a9e5c;
   --warn: #f0a500;
   --glass: rgba(10,10,15,0.78);
-  --mono: 'Courier New', monospace;
+  --mono: Arial, sans-serif;
 }
 body { background:var(--ink); color:var(--paper); font-family:var(--mono);
        overflow:hidden; height:100dvh; width:100vw; }
@@ -148,6 +148,7 @@ body { background:var(--ink); color:var(--paper); font-family:var(--mono);
 
 <!-- SPLASH -->
 <div id="splash">
+  <div style="font-size:.65rem;letter-spacing:.12em;opacity:.35;text-transform:uppercase;margin-bottom:-.5rem">v0.4 — fix yaw + quota modello</div>
   <h1>RHINO<br><span>AR</span></h1>
   <p>Tracking posizione da marker ArUco — modello Rhino in overlay real-time</p>
   <button class="btn-primary" id="btn-start">AVVIA</button>
@@ -246,7 +247,8 @@ const S = {
   camReady: false,
   imuReady: false,
   // Camera world position (model metres, Rhino coords)
-  wx: 0, wy: -2, wz: 1.7,
+  // Default: standing 3m in front of origin (Y=-3), eye height 1.7m
+  wx: 0, wy: -3, wz: 1.7,
   // IMU angles
   alpha:0, beta:0, gamma:0,
   // Last anchor
@@ -345,6 +347,19 @@ function buildModel() {
   // Floor grid
   const grid = new THREE.GridHelper(24, 24, 0x222228, 0x18181e);
   modelGroup.add(grid);
+
+  // Origin marker: small red sphere at (0,0,0) for calibration
+  const originGeo = new THREE.SphereGeometry(0.12, 8, 8);
+  const originMat = new THREE.MeshPhongMaterial({ color:0xe8410a, opacity:.9, transparent:true });
+  const originMesh = new THREE.Mesh(originGeo, originMat);
+  originMesh.position.set(0, 0, 0); // Three.js origin = Rhino (0,0,0)
+  modelGroup.add(originMesh);
+
+  // Axis lines from origin (X=red 1m, Y(rhino)=blue 1m, Z=green 1m)
+  const axisGeo = (x2,y2,z2) => { const g=new THREE.BufferGeometry(); g.setFromPoints([new THREE.Vector3(0,0,0),new THREE.Vector3(x2,y2,z2)]); return g; };
+  modelGroup.add(new THREE.Line(axisGeo(1,0,0), new THREE.LineBasicMaterial({color:0xff4444}))); // X
+  modelGroup.add(new THREE.Line(axisGeo(0,1,0), new THREE.LineBasicMaterial({color:0x44ff44}))); // Y(up)=Z(rhino)
+  modelGroup.add(new THREE.Line(axisGeo(0,0,-1), new THREE.LineBasicMaterial({color:0x4444ff}))); // Z(three)=-Y(rhino)
 }
 
 function markSeen(id) {
@@ -393,7 +408,8 @@ function imuQuat() {
   const a = THREE.MathUtils.degToRad(S.alpha);
   const b = THREE.MathUtils.degToRad(S.beta);
   const g = THREE.MathUtils.degToRad(S.gamma);
-  const e = new THREE.Euler(b, -a, -g, 'YXZ');
+  // +a fixes left/right mirror (was -a); -g corrects roll for portrait mode
+  const e = new THREE.Euler(b, a, -g, 'YXZ');
   return new THREE.Quaternion().setFromEuler(e);
 }
 
@@ -461,7 +477,7 @@ function detectAruco(now) {
     // T gives camera position relative to marker in marker frame
     // We need to rotate T back to world frame using R^T then add marker world pos
     const tx = T[0], ty = T[1], tz = T[2];
-    // Camera world pos (Rhino coords: X right, Y forward, Z up)
+  // Camera world pos (Rhino coords: X right, Y forward, Z up)
     const camX = el.x - (R[0][0]*tx + R[1][0]*ty + R[2][0]*tz);
     const camY = el.y - (R[0][2]*tx + R[1][2]*ty + R[2][2]*tz);
     const camZ = el.z - (R[0][1]*tx + R[1][1]*ty + R[2][1]*tz);
@@ -626,7 +642,7 @@ document.getElementById('tb-list').addEventListener('click', () => {
 });
 
 document.getElementById('tb-reset').addEventListener('click', () => {
-  S.wx=0; S.wy=-2; S.wz=1.7;
+  S.wx=0; S.wy=-3; S.wz=1.7;
   S.anchor=null; S.seen.clear();
   buildModel(); buildList();
   setStatus('warn', 'Reset — cerca un marker ArUco');
