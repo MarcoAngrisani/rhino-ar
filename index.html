@@ -45,9 +45,16 @@ button:active { opacity:.8; }
   padding:.55rem .85rem; border-left:3px solid #f0a500;
   font-size:.7rem; letter-spacing:.06em; text-transform:uppercase;
   pointer-events:none; z-index:10;
+  transition: border-left-color .3s;
 }
-#status.anchored { border-left-color:#1a9e5c; }
+#status.anchored  { border-left-color:#1a9e5c; }
 #status.searching { border-left-color:#e8410a; }
+#status.degraded  { border-left-color:#f0a500; }
+#status.lost      { border-left-color:#d32f2f; animation: pulse-lost 1.2s infinite; }
+@keyframes pulse-lost {
+  0%, 100% { background:rgba(10,10,15,.78); }
+  50%      { background:rgba(211,47,47,.4); }
+}
 
 #info {
   position:fixed; bottom:1rem; left:1rem; right:1rem;
@@ -82,9 +89,9 @@ button:active { opacity:.8; }
 <body>
 
 <div id="splash">
-  <div class="version">v1.4 — Step L2: optical flow + IMU + POSIT</div>
-  <h1>STEP <span>L2</span></h1>
-  <p>Tracking traslazione tramite optical flow + IMU per rotazione + POSIT per ancora. Cammina lentamente e il modello dovrebbe restare fermo.</p>
+  <div class="version">v1.5 — Step N+O: soft anchor + tracking quality</div>
+  <h1>STEP <span>N+O</span></h1>
+  <p>Soft re-anchor + tracking quality detection. Il modello si adatta morbido al marker e mostra lo stato del tracking in tempo reale.</p>
   <label>Dim. marker (mm)
     <input type="number" id="marker-size" value="50" min="10" max="500">
   </label>
@@ -111,6 +118,8 @@ button:active { opacity:.8; }
 
 <div id="info">
   <div class="kv"><span>Stato</span><span id="i-state">init</span></div>
+  <div class="kv"><span>Trust</span><span id="i-trust">—</span></div>
+  <div class="kv"><span>Drift OF</span><span id="i-drift">—</span></div>
   <div class="kv"><span>Feature OF</span><span id="i-of">0</span></div>
   <div class="kv"><span>Pos camera</span><span id="i-pos">—</span></div>
   <div class="kv"><span>Trasl.frame</span><span id="i-trans">—</span></div>
@@ -2346,9 +2355,20 @@ const ANCHOR = {
   modelMatrix: new THREE.Matrix4(),
   // Camera position in WORLD frame. Updated by optical flow translation.
   camPos: new THREE.Vector3(),
+  // Target position (chased by smoothCamPos for soft re-anchoring).
+  targetCamPos: new THREE.Vector3(),
   // Distance to scene (m) — used to convert pixel flow to metres.
-  // Initially set to POSIT distance to marker. Refined later.
   sceneDistance: 1.5,
+  // Timestamp of last successful marker-driven re-anchor.
+  lastMarkerT: 0,
+};
+
+// ── TRACKING QUALITY (Step O) ──
+const TRACK = {
+  state: 'init',          // 'init' | 'ok' | 'degraded' | 'lost'
+  lastFlowOkT: 0,         // last time we had a healthy flow update
+  driftMeters: 0,         // estimated drift since last marker
+  trustScore: 1.0,        // 0..1, decays with time / poor flow
 };
 
 function setStatus(t, kind) {
@@ -2480,40 +2500,179 @@ function posit2three(pose) {
 // ═══════════════════════════════════════════════
 // ANCHOR — same logic as Step I, but now camera CAN move
 // ═══════════════════════════════════════════════
+// ═══════════════════════════════════════════════
+// ANCHOR — N: soft re-anchor with low-pass smoothing
+// ═══════════════════════════════════════════════
+// First time we see a marker → hard set ANCHOR.modelMatrix and reset camPos.
+// Subsequent sightings → compute the IMPLIED camera position from the marker
+// pose, and slowly blend ANCHOR.camPos toward it. Same for model placement.
+//
+// Why blend the camera, not the model? Because in our coord system the model
+// lives in WORLD frame and the camera is what moves. Whatever the marker
+// "wants" the camera to be at is the truth; OF drift made us drift away.
+
+const ANCHOR_BLEND_ALPHA = 0.12; // higher = faster correction, more visible snap
+
 function doAnchor(markerId, pose) {
   const mk = MARKER_MAP[markerId];
   if (!mk) return;
 
+  const T = pose.bestTranslation;
+  const newSceneDist = Math.sqrt(T[0]*T[0]+T[1]*T[1]+T[2]*T[2]);
+
+  // Camera-frame pose of the model that this marker implies
   const markerInCam = posit2three(pose);
   const markerToOrigin = new THREE.Matrix4().makeTranslation(-mk.ax, -mk.ay, -mk.az);
   const modelInCam = new THREE.Matrix4().multiplyMatrices(markerInCam, markerToOrigin);
 
-  // Convert to world frame using current IMU
-  const camInWorld = new THREE.Matrix4().makeRotationFromQuaternion(imuToCamQuat());
-  // Camera is currently at ANCHOR.camPos in world (if we already had one), else origin.
-  // For initial anchor: camera at origin. For re-anchor after walking: we should
-  // ADD current camera position to the transform.
-  const camPosMat = new THREE.Matrix4().setPosition(ANCHOR.camPos);
-  const camPoseInWorld = new THREE.Matrix4().multiplyMatrices(camPosMat, camInWorld);
-  const modelInWorld = new THREE.Matrix4().multiplyMatrices(camPoseInWorld, modelInCam);
+  if (!ANCHOR.set) {
+    // ── FIRST ANCHOR (hard set) ──
+    const camInWorld = new THREE.Matrix4().makeRotationFromQuaternion(imuToCamQuat());
+    const camPosMat = new THREE.Matrix4().setPosition(ANCHOR.camPos);
+    const camPoseInWorld = new THREE.Matrix4().multiplyMatrices(camPosMat, camInWorld);
+    const modelInWorld = new THREE.Matrix4().multiplyMatrices(camPoseInWorld, modelInCam);
 
-  ANCHOR.modelMatrix.copy(modelInWorld);
-  ANCHOR.set = true;
+    ANCHOR.modelMatrix.copy(modelInWorld);
+    ANCHOR.set = true;
+    ANCHOR.sceneDistance = newSceneDist;
+    ANCHOR.targetCamPos = ANCHOR.camPos.clone();
 
-  // Save distance to scene (for OF scale)
-  const T = pose.bestTranslation;
-  ANCHOR.sceneDistance = Math.sqrt(T[0]*T[0]+T[1]*T[1]+T[2]*T[2]);
+    modelGroup.matrixAutoUpdate = false;
+    modelGroup.matrix.copy(ANCHOR.modelMatrix);
+    modelGroup.matrixWorldNeedsUpdate = true;
+    modelGroup.visible = true;
+  } else {
+    // ── RE-ANCHOR (soft) ──
+    // The marker tells us where the camera WOULD be if there were no drift.
+    // Given fixed model (ANCHOR.modelMatrix) and observed modelInCam,
+    // the camera pose in world satisfies:
+    //   modelInWorld = camPoseInWorld · modelInCam
+    //   camPoseInWorld = modelInWorld · modelInCam⁻¹
+    const modelInCamInv = new THREE.Matrix4().copy(modelInCam).invert();
+    const camPoseInWorld = new THREE.Matrix4()
+      .multiplyMatrices(ANCHOR.modelMatrix, modelInCamInv);
 
-  modelGroup.matrixAutoUpdate = false;
-  modelGroup.matrix.copy(ANCHOR.modelMatrix);
-  modelGroup.matrixWorldNeedsUpdate = true;
-  modelGroup.visible = true;
+    // Extract position from camPoseInWorld
+    const targetPos = new THREE.Vector3();
+    targetPos.setFromMatrixPosition(camPoseInWorld);
+
+    // Don't snap — set target. The actual camPos will smoothly chase it.
+    ANCHOR.targetCamPos.copy(targetPos);
+
+    // Refresh scene distance for OF scale
+    ANCHOR.sceneDistance = ANCHOR.sceneDistance * 0.7 + newSceneDist * 0.3;
+
+    // Record we just saw a known marker (used by tracking quality logic)
+    ANCHOR.lastMarkerT = performance.now();
+
+    // Marker contact resets drift estimate
+    TRACK.driftMeters = 0;
+    TRACK.trustScore = 1.0;
+  }
+}
+
+// Smoothly drag camPos toward targetCamPos. Called every frame.
+function smoothCamPos() {
+  if (!ANCHOR.targetCamPos) return;
+  const dx = ANCHOR.targetCamPos.x - ANCHOR.camPos.x;
+  const dy = ANCHOR.targetCamPos.y - ANCHOR.camPos.y;
+  const dz = ANCHOR.targetCamPos.z - ANCHOR.camPos.z;
+  const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+  if (dist < 0.001) return; // already there
+  // If the gap is huge (>2m), snap immediately — probably user teleported
+  if (dist > 2.0) {
+    ANCHOR.camPos.copy(ANCHOR.targetCamPos);
+    return;
+  }
+  ANCHOR.camPos.x += dx * ANCHOR_BLEND_ALPHA;
+  ANCHOR.camPos.y += dy * ANCHOR_BLEND_ALPHA;
+  ANCHOR.camPos.z += dz * ANCHOR_BLEND_ALPHA;
 }
 
 function updateCamera() {
   if (!IMU.ready) return;
+  smoothCamPos();
   cam3.quaternion.copy(imuToCamQuat());
   cam3.position.copy(ANCHOR.camPos);
+}
+
+// ═══════════════════════════════════════════════
+// TRACKING QUALITY (Step O)
+// ═══════════════════════════════════════════════
+// We classify the tracking state into 4 levels and use it to:
+//   • change status-bar color
+//   • fade the model opacity when degraded/lost
+//   • show a hint "torna a un marker" when lost
+//
+// Inputs to the classifier (per frame):
+//   • Number of OF feature points
+//   • Time since last successful flow update
+//   • Time since last marker re-anchor
+//   • Accumulated drift in metres
+//
+// Output: TRACK.state and TRACK.trustScore (0..1).
+
+function updateTrackingQuality(now) {
+  if (!ANCHOR.set) {
+    TRACK.state = 'init';
+    TRACK.trustScore = 1.0;
+    return;
+  }
+
+  const nFeat = STATE.features.length;
+  const sinceFlow = TRACK.lastFlowOkT ? (now - TRACK.lastFlowOkT) : 9999;
+  const sinceMarker = ANCHOR.lastMarkerT ? (now - ANCHOR.lastMarkerT) : 9999;
+
+  // Trust decays:
+  //   - linearly with drift (0.5m → lose half trust)
+  //   - linearly with time since last marker (>30s → halve)
+  //   - sharply when flow stalls (>500ms without good flow)
+  let trust = 1.0;
+  trust *= Math.max(0, 1 - TRACK.driftMeters / 1.5);  // 1.5m drift → 0 trust
+  trust *= Math.max(0.2, 1 - sinceMarker / 60000);    // 1 min → 0.2 trust
+  if (sinceFlow > 500) trust *= 0.4;
+  if (sinceFlow > 1500) trust *= 0.1;
+  TRACK.trustScore = Math.max(0, Math.min(1, trust));
+
+  // State buckets
+  let state;
+  if (nFeat < 5 || sinceFlow > 1500) state = 'lost';
+  else if (nFeat < 20 || trust < 0.5 || sinceFlow > 400) state = 'degraded';
+  else state = 'ok';
+  TRACK.state = state;
+
+  // Apply visual feedback
+  applyTrackingVisuals(state);
+}
+
+function applyTrackingVisuals(state) {
+  const statusEl = document.getElementById('status');
+  statusEl.classList.remove('anchored','searching','degraded','lost');
+
+  // Model opacity reflects trust
+  if (modelGroup && modelGroup.visible) {
+    modelGroup.traverse(obj => {
+      if (obj.material && obj.material.transparent) {
+        const baseOp = obj.material.userData.baseOpacity ?? obj.material.opacity;
+        if (obj.material.userData.baseOpacity === undefined) {
+          obj.material.userData.baseOpacity = obj.material.opacity;
+        }
+        // Multiply base opacity by trust (clamped to never disappear)
+        obj.material.opacity = Math.max(0.15, obj.material.userData.baseOpacity * TRACK.trustScore);
+      }
+    });
+  }
+
+  if (state === 'ok') {
+    statusEl.classList.add('anchored');
+    setStatus('Tracking — esplora liberamente', 'anchored');
+  } else if (state === 'degraded') {
+    statusEl.classList.add('degraded');
+    setStatus(`Tracking debole (drift ~${TRACK.driftMeters.toFixed(2)}m)`, 'degraded');
+  } else if (state === 'lost') {
+    statusEl.classList.add('lost');
+    setStatus('TRACKING PERSO — torna a un marker', 'lost');
+  }
 }
 
 // ═══════════════════════════════════════════════
@@ -2771,19 +2930,26 @@ function loop(now) {
 
     const trans = computeTranslationFromFlow(residualFlow, focalPx);
     if (trans) {
-      // Translation is in CAMERA frame (X right, Y up, Z forward in camera).
-      // Convert to WORLD frame by rotating with camera orientation.
       const transVec = new THREE.Vector3(trans.dx, trans.dy, trans.dz);
       transVec.applyQuaternion(curImuQuat);
-      // Small clamping: skip implausibly large jumps (>20cm/frame)
+      // Clamp implausibly large jumps (>20cm/frame)
       if (transVec.length() < 0.2) {
+        // Apply to both current and target — OF drives the camera forward,
+        // soft re-anchor only fights it when a marker disagrees.
         ANCHOR.camPos.add(transVec);
+        ANCHOR.targetCamPos.add(transVec);
+        // Accumulate estimated drift (used to decay trust)
+        TRACK.driftMeters += transVec.length();
+        TRACK.lastFlowOkT = performance.now();
       }
       document.getElementById('i-trans').textContent =
         `Δx${trans.dx.toFixed(3)} Δy${trans.dy.toFixed(3)}`;
     }
   }
   STATE.prevImuQuat = IMU.ready ? imuToCamQuat() : null;
+
+  // ── TRACKING QUALITY UPDATE (Step O) ──
+  updateTrackingQuality(now);
 
   // ── UPDATE CAMERA ──
   updateCamera();
@@ -2799,9 +2965,11 @@ function loop(now) {
   document.getElementById('i-of').textContent = STATE.features.length;
   document.getElementById('i-pos').textContent =
     `${ANCHOR.camPos.x.toFixed(2)} ${ANCHOR.camPos.y.toFixed(2)} ${ANCHOR.camPos.z.toFixed(2)}`;
-  document.getElementById('i-state').textContent = ANCHOR.set ? 'TRACKING' : 'cerca marker';
-  if (ANCHOR.set) setStatus('Tracking attivo — cammina lentamente', 'anchored');
-  else setStatus('Inquadra un marker per ancorare', 'searching');
+  document.getElementById('i-state').textContent = TRACK.state.toUpperCase();
+  document.getElementById('i-trust').textContent = (TRACK.trustScore * 100).toFixed(0) + '%';
+  document.getElementById('i-drift').textContent = TRACK.driftMeters.toFixed(2) + ' m';
+  if (!ANCHOR.set) setStatus('Inquadra un marker per ancorare', 'searching');
+  // (when ANCHOR.set, setStatus is already called by applyTrackingVisuals)
 
   STATE.frames++;
   if (now - STATE.fpsT > 1000) {
@@ -2855,6 +3023,10 @@ document.getElementById('tb-markers').addEventListener('click', () => {
 document.getElementById('tb-reanchor').addEventListener('click', () => {
   ANCHOR.set = false;
   ANCHOR.camPos.set(0,0,0);
+  ANCHOR.targetCamPos.set(0,0,0);
+  TRACK.driftMeters = 0;
+  TRACK.trustScore = 1.0;
+  TRACK.state = 'init';
   modelGroup.visible = false;
   setStatus('Re-anchor: inquadra di nuovo un marker', 'searching');
 });
