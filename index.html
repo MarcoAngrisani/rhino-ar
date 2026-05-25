@@ -148,7 +148,7 @@ body { background:var(--ink); color:var(--paper); font-family:var(--mono);
 
 <!-- SPLASH -->
 <div id="splash">
-  <div style="font-size:.65rem;letter-spacing:.12em;opacity:.35;text-transform:uppercase;margin-bottom:-.5rem">v0.4 — fix yaw + quota modello</div>
+  <div style="font-size:.65rem;letter-spacing:.12em;opacity:.35;text-transform:uppercase;margin-bottom:-.5rem">v0.5 — fix orientamento camera</div>
   <h1>RHINO<br><span>AR</span></h1>
   <p>Tracking posizione da marker ArUco — modello Rhino in overlay real-time</p>
   <button class="btn-primary" id="btn-start">AVVIA</button>
@@ -408,8 +408,15 @@ function imuQuat() {
   const a = THREE.MathUtils.degToRad(S.alpha);
   const b = THREE.MathUtils.degToRad(S.beta);
   const g = THREE.MathUtils.degToRad(S.gamma);
-  // +a fixes left/right mirror (was -a); -g corrects roll for portrait mode
-  const e = new THREE.Euler(b, a, -g, 'YXZ');
+
+  // iPhone DeviceOrientation reference frame:
+  //   beta=0  → phone flat on table face-up
+  //   beta=90 → phone vertical (portrait, camera pointing at horizon)
+  // Three.js camera default looks toward -Z (horizon).
+  // We need beta=90 → pitch=0 in Three.js, so subtract 90° from beta.
+  // +a fixes left/right mirror; -g corrects roll for portrait mode.
+  const pitch = b - Math.PI / 2;
+  const e = new THREE.Euler(pitch, a, -g, 'YXZ');
   return new THREE.Quaternion().setFromEuler(e);
 }
 
