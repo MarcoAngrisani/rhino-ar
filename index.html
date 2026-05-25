@@ -61,7 +61,7 @@ button:active { opacity:.8; }
 <body>
 
 <div id="splash">
-  <div class="version">v1.0.1 — Step F: fix pose matrix</div>
+  <div class="version">v1.0.2 — fix Y inversion + Z-only flip</div>
   <h1>STEP <span>F</span></h1>
   <p>Un cubo virtuale verrà disegnato sopra il marker. Deve restare ancorato fisicamente al marker mentre muovi il telefono.</p>
   <label>
@@ -2294,29 +2294,25 @@ function applyPose(pose) {
   const R = pose.bestRotation;
   const T = pose.bestTranslation;
 
-  // 1) Position: flip Y and Z
-  markerCube.position.set( T[0], -T[1], -T[2] );
+  // 1) Position: marker corners were already passed to POSIT with Y flipped
+  //    (y: vh/2 - c.y), so POSIT's translation Y is already in math-convention
+  //    (Y up). Only Z needs to flip for Three.js (POSIT Z forward → Three -Z).
+  markerCube.position.set( T[0], T[1], -T[2] );
 
-  // 2) Rotation: build rotation matrix from POSIT, apply F on both sides.
-  //    F · R · F  means: negate row 1,2 and column 1,2 (= flip Y,Z axes).
-  //    Easier path: build a Three.Matrix4 from POSIT R directly,
-  //    then apply rotation around X by 180° on both sides (which is exactly F).
+  // 2) Rotation: convert from POSIT camera (Y up, Z forward) to
+  //    Three.js camera (Y up, Z backward). The frames differ by a Z flip.
+  //    To convert a rotation matrix when one axis flips:
+  //      negate the entries that involve Z (third row and third column),
+  //      EXCEPT the (Z,Z) entry which gets negated twice = stays the same.
   const m = new THREE.Matrix4();
-  // THREE.Matrix4 is row-major in .set()
   m.set(
-    R[0][0], R[0][1], R[0][2], 0,
-    R[1][0], R[1][1], R[1][2], 0,
-    R[2][0], R[2][1], R[2][2], 0,
-    0,       0,       0,       1
+     R[0][0],  R[0][1], -R[0][2], 0,
+     R[1][0],  R[1][1], -R[1][2], 0,
+    -R[2][0], -R[2][1],  R[2][2], 0,
+     0,        0,        0,       1
   );
 
-  // F = rotation 180° around X axis. F·R·F flips Y and Z signs in both rows AND columns.
-  const F = new THREE.Matrix4().makeRotationX(Math.PI);
-  // Compute F · R · F  (since F = F⁻¹ for 180° rotation, F·R·F⁻¹ == F·R·F)
-  const mFinal = new THREE.Matrix4().multiplyMatrices(F, m).multiply(F);
-
-  // Extract quaternion and apply
-  const q = new THREE.Quaternion().setFromRotationMatrix(mFinal);
+  const q = new THREE.Quaternion().setFromRotationMatrix(m);
   markerCube.quaternion.copy(q);
 
   // Reset to autoUpdate so position+quaternion compose normally
