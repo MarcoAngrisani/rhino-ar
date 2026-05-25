@@ -82,7 +82,7 @@ button:active { opacity:.8; }
 <body>
 
 <div id="splash">
-  <div class="version">v1.2 — Step I: ancora persistente + IMU</div>
+  <div class="version">v1.2.1 — fix: model in world frame</div>
   <h1>STEP <span>I</span></h1>
   <p>Inquadra un marker per ancorare. Una volta ancorato, il modello resta nello spazio. Girando il telefono guardi attorno.</p>
   <label>Dim. marker (mm)
@@ -2442,55 +2442,46 @@ function doAnchor(markerId, pose) {
   const mk = MARKER_MAP[markerId];
   if (!mk) return;
 
-  // 1. Marker pose in camera space (at this moment)
+  // 1. Marker pose in CAMERA space at this instant
   const markerInCam = posit2three(pose);
 
-  // 2. Translation from marker frame to model origin:
-  //    marker is at (ax, ay, az) in model. To go from marker-local (0,0,0) to
-  //    model origin, translate by (-ax, -ay, -az).
+  // 2. From marker to model origin (translation only in model frame)
   const markerToModelOrigin = new THREE.Matrix4().makeTranslation(-mk.ax, -mk.ay, -mk.az);
 
-  // 3. Full model placement: model_origin_in_cam = markerInCam · markerToModelOrigin
+  // 3. Model placement in CAMERA frame
   const modelInCam = new THREE.Matrix4().multiplyMatrices(markerInCam, markerToModelOrigin);
 
-  // 4. We're "freezing" this. From this moment on, modelGroup.matrix = modelInCam,
-  //    EXPRESSED IN WORLD COORDINATES. Currently world == camera (camera at origin).
-  //    But we'll rotate the camera with the IMU delta, so the world is fixed and
-  //    the camera moves around it.
-  //
-  //    The trick: when we anchor, we ALSO set the camera position+rotation to
-  //    where it physically is right now. Camera position stays at (0,0,0) but
-  //    its orientation should match what the IMU is reading.
-  //
-  //    Easier formulation:
-  //      anchor.modelMatrix = modelInCam (relative to camera at anchor time)
-  //      anchor.imuAtAnchor = current IMU quat
-  //      cam.quaternion(t) = currentIMU · anchorIMU⁻¹  (delta rotation)
-  //      cam.position stays at (0,0,0) — model is rendered relative to camera
+  // 4. KEY STEP: convert from camera frame to WORLD frame.
+  //    The camera right now is oriented like the IMU says.
+  //    World frame = identity Three.js scene (Y=up, gravity-aligned).
+  //    Transform: model_in_world = camera_in_world · model_in_camera
+  //               where camera_in_world = current IMU quaternion as matrix.
+  const camInWorld = new THREE.Matrix4().makeRotationFromQuaternion(imuToCamQuat());
+  const modelInWorld = new THREE.Matrix4().multiplyMatrices(camInWorld, modelInCam);
 
-  ANCHOR.modelMatrix.copy(modelInCam);
-  ANCHOR.imuQuatAtAnchor.copy(imuToCamQuat());
-  ANCHOR.cameraPos.set(0, 0, 0);
-  ANCHOR.cameraQuat.identity();
+  // 5. Freeze the model in WORLD coordinates. From now on:
+  //    - modelGroup.matrix stays as modelInWorld
+  //    - cam3.quaternion is driven directly by IMU (absolute, gravity-aware)
+  //    - cam3.position stays at (0,0,0)
+  //
+  //    Because the camera moves freely with the IMU and the model is in
+  //    world coordinates, the model appears stationary in real space.
+  ANCHOR.modelMatrix.copy(modelInWorld);
   ANCHOR.set = true;
 
-  // Apply to scene
+  // Apply
   modelGroup.matrixAutoUpdate = false;
   modelGroup.matrix.copy(ANCHOR.modelMatrix);
   modelGroup.matrixWorldNeedsUpdate = true;
   modelGroup.visible = true;
 }
 
-// Each frame: update camera based on IMU delta from anchor moment
+// Each frame: camera quaternion = current IMU directly (no delta tricks).
+// The model is in world frame, so this just works.
 function updateCameraFromIMU() {
-  if (!ANCHOR.set || !IMU.ready) return;
-  const current = imuToCamQuat();
-  // Delta = current · anchor⁻¹
-  const anchorInv = ANCHOR.imuQuatAtAnchor.clone().invert();
-  const delta = current.multiply(anchorInv);
-  // cam quat = delta · anchor.cameraQuat(=identity) = delta
-  cam3.quaternion.copy(delta);
-  cam3.position.copy(ANCHOR.cameraPos);
+  if (!IMU.ready) return;
+  cam3.quaternion.copy(imuToCamQuat());
+  cam3.position.set(0, 0, 0);
 }
 
 // ═══════════════════════════════════════════════
