@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Step C — Three.js</title>
+<title>Step D — IMU + Three.js</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family: Arial, sans-serif; background:#000; color:#fff; overflow:hidden; height:100dvh; width:100vw; }
@@ -25,6 +25,16 @@ button {
 }
 button:active { opacity:.8; }
 
+#perm-modal {
+  position:fixed; inset:0; z-index:150; background:rgba(10,10,15,.95);
+  display:none; flex-direction:column; align-items:center; justify-content:center;
+  gap:1.2rem; padding:2rem; text-align:center;
+}
+#perm-modal.show { display:flex; }
+.ico { font-size:2.5rem; }
+#perm-modal h2 { font-size:1.1rem; text-transform:uppercase; letter-spacing:.06em; }
+#perm-modal p { font-size:.8rem; opacity:.55; max-width:280px; line-height:1.6; }
+
 #cam { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; }
 #c3d { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; }
 
@@ -39,8 +49,8 @@ button:active { opacity:.8; }
 #info {
   position:fixed; bottom:1rem; left:1rem; right:1rem;
   background:rgba(10,10,15,.75); backdrop-filter:blur(10px);
-  padding:.7rem .9rem; font-size:.72rem; line-height:1.7;
-  pointer-events:none; z-index:10;
+  padding:.7rem .9rem; font-size:.7rem; line-height:1.8;
+  pointer-events:none; z-index:10; font-family: 'Courier New', monospace;
 }
 .kv { display:flex; justify-content:space-between; gap:1rem; }
 .kv span:first-child { opacity:.55; }
@@ -49,10 +59,17 @@ button:active { opacity:.8; }
 <body>
 
 <div id="splash">
-  <div class="version">v0.7 — Step C: Three.js statico</div>
-  <h1>STEP <span>C</span></h1>
-  <p>Test Three.js: deve apparire un cubo arancione a 2m davanti a te, con una griglia a pavimento.</p>
+  <div class="version">v0.8 — Step D: IMU + Three.js</div>
+  <h1>STEP <span>D</span></h1>
+  <p>Test sync IMU: il cubo arancione deve restare fermo nello spazio mentre ruoti il telefono.</p>
   <button id="btn-start">AVVIA</button>
+</div>
+
+<div id="perm-modal">
+  <div class="ico">📡</div>
+  <h2>Giroscopio</h2>
+  <p>Necessario per ruotare la vista 3D in sync col telefono</p>
+  <button id="btn-gyro">AUTORIZZA</button>
 </div>
 
 <video id="cam" autoplay playsinline muted></video>
@@ -61,22 +78,27 @@ button:active { opacity:.8; }
 <div id="status">In attesa…</div>
 
 <div id="info">
-  <div class="kv"><span>Cubo</span><span>a 2m davanti — lato 0.5m</span></div>
-  <div class="kv"><span>Griglia</span><span>10x10m, celle 1m</span></div>
-  <div class="kv"><span>Sfera rossa</span><span>origine 0,0,0</span></div>
-  <div class="kv"><span>Camera</span><span>altezza 1.7m</span></div>
+  <div class="kv"><span>α (yaw)</span><span id="i-a">—</span></div>
+  <div class="kv"><span>β (pitch)</span><span id="i-b">—</span></div>
+  <div class="kv"><span>γ (roll)</span><span id="i-g">—</span></div>
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>
 'use strict';
 
-const video = document.getElementById('cam');
+const video  = document.getElementById('cam');
 const canvas = document.getElementById('c3d');
 let renderer, scene, cam3;
 
+// IMU state
+const IMU = { a:0, b:0, g:0, ready:false };
+
 function setStatus(t) { document.getElementById('status').textContent = t; }
 
+// ─────────────────────────────────────
+// CAMERA
+// ─────────────────────────────────────
 async function startCamera() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -85,7 +107,6 @@ async function startCamera() {
     });
     video.srcObject = stream;
     await video.play();
-    setStatus('Camera OK — Three.js attivo');
     return true;
   } catch(e) {
     setStatus('Camera non disponibile');
@@ -93,6 +114,78 @@ async function startCamera() {
   }
 }
 
+// ─────────────────────────────────────
+// IMU — W3C quaternion (no gimbal lock)
+// ─────────────────────────────────────
+function onOrientation(e) {
+  if (e.alpha === null && e.beta === null) return;
+  IMU.a = e.alpha || 0;
+  IMU.b = e.beta  || 0;
+  IMU.g = e.gamma || 0;
+  if (!IMU.ready) {
+    IMU.ready = true;
+    setStatus('Giroscopio attivo — ruota il telefono');
+  }
+}
+
+async function requestGyro() {
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    try {
+      const r = await DeviceOrientationEvent.requestPermission();
+      if (r === 'granted') {
+        window.addEventListener('deviceorientation', onOrientation, true);
+        return true;
+      }
+    } catch(e) {}
+    return false;
+  }
+  window.addEventListener('deviceorientation', onOrientation, true);
+  return true;
+}
+
+// IMU → Three.js camera quaternion (W3C standard, gimbal-lock free)
+// Reference: https://w3c.github.io/deviceorientation/#worked-example
+function imuToCamQuat() {
+  const a = THREE.MathUtils.degToRad(IMU.a);
+  const b = THREE.MathUtils.degToRad(IMU.b);
+  const g = THREE.MathUtils.degToRad(IMU.g);
+
+  // Build device quaternion: q = Rz(a) · Rx(b) · Ry(g)
+  const ca=Math.cos(a/2), sa=Math.sin(a/2);
+  const cb=Math.cos(b/2), sb=Math.sin(b/2);
+  const cg=Math.cos(g/2), sg=Math.sin(g/2);
+
+  const qx = sa*cb*cg - ca*sb*sg;
+  const qy = ca*cb*sg + sa*sb*cg;
+  const qz = ca*sb*cg + sa*cb*sg;
+  const qw = ca*cb*cg - sa*sb*sg;
+
+  // Wait — the official W3C formula is:
+  // q = Rz(α) · Rx(β) · Ry(γ)
+  // which gives the rotation from EARTH frame to DEVICE frame.
+  // The components (with Three.js Y-up convention):
+  const qDev = new THREE.Quaternion();
+  qDev.setFromEuler(new THREE.Euler(b, a, -g, 'YXZ'));
+  // ↑ This is mathematically equivalent for our purpose but built-in is more readable.
+  // The order 'YXZ' here means: first rotate around Y by α, then X by β, then Z by -γ.
+
+  // Now we need to rotate the camera so that:
+  //   - phone vertical (β=90°)  → camera looks at horizon (Three.js looks at -Z)
+  //   - phone tilted down (β=0) → camera looks at floor
+  //
+  // The transform: rotate -90° around X (world frame) brings the
+  // device frame in line with the Three.js camera convention.
+  const align = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(1, 0, 0), -Math.PI / 2
+  );
+
+  return qDev.multiply(align);
+}
+
+// ─────────────────────────────────────
+// THREE.JS SCENE
+// ─────────────────────────────────────
 function initThree() {
   renderer = new THREE.WebGLRenderer({ canvas, alpha:true, antialias:true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -100,48 +193,64 @@ function initThree() {
   renderer.setClearColor(0,0);
 
   scene = new THREE.Scene();
-
-  // Camera Three.js: X=destra, Y=alto, Z=verso osservatore
-  // Posizione: altezza occhi 1.7m, sul punto (0,0)
-  // Default Three.js camera guarda verso -Z (l'orizzonte)
   cam3 = new THREE.PerspectiveCamera(62, window.innerWidth/window.innerHeight, 0.05, 200);
-  cam3.position.set(0, 1.7, 0);
-  // Default lookAt: (0,1.7,-1) → guarda l'orizzonte in direzione -Z
+  cam3.position.set(0, 1.7, 0); // altezza occhi
+  // orientation will be driven by IMU
 
-  // Luci
   scene.add(new THREE.AmbientLight(0xffffff, 1.0));
   const dir = new THREE.DirectionalLight(0xffffff, 0.6);
   dir.position.set(3, 8, 3);
   scene.add(dir);
 
-  // ── CUBO a 2m davanti (Z = -2 in Three.js) ──
+  // Cubo arancione — al centro a 2m davanti
   const cubeGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
   const cubeMat = new THREE.MeshPhongMaterial({ color: 0xe8410a, opacity: 0.85, transparent: true });
   const cube = new THREE.Mesh(cubeGeo, cubeMat);
-  cube.position.set(0, 1.0, -2); // 2m davanti, 1m da terra
-  // wireframe edges
+  cube.position.set(0, 1.0, -2);
   const edges = new THREE.LineSegments(
     new THREE.EdgesGeometry(cubeGeo),
-    new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 })
+    new THREE.LineBasicMaterial({ color: 0xffffff })
   );
   cube.add(edges);
   scene.add(cube);
 
-  // ── GRIGLIA pavimento ──
+  // Cubo BLU a destra (per testare rotazione yaw)
+  const cubeBlue = new THREE.Mesh(
+    new THREE.BoxGeometry(0.4, 0.4, 0.4),
+    new THREE.MeshPhongMaterial({ color: 0x4a9eff, opacity:.85, transparent:true })
+  );
+  cubeBlue.position.set(2, 1.0, 0); // 2m a destra
+  cubeBlue.add(new THREE.LineSegments(
+    new THREE.EdgesGeometry(cubeBlue.geometry),
+    new THREE.LineBasicMaterial({ color: 0xffffff })
+  ));
+  scene.add(cubeBlue);
+
+  // Cubo VERDE a sinistra
+  const cubeGreen = new THREE.Mesh(
+    new THREE.BoxGeometry(0.4, 0.4, 0.4),
+    new THREE.MeshPhongMaterial({ color: 0x1a9e5c, opacity:.85, transparent:true })
+  );
+  cubeGreen.position.set(-2, 1.0, 0);
+  cubeGreen.add(new THREE.LineSegments(
+    new THREE.EdgesGeometry(cubeGreen.geometry),
+    new THREE.LineBasicMaterial({ color: 0xffffff })
+  ));
+  scene.add(cubeGreen);
+
+  // Griglia
   const grid = new THREE.GridHelper(10, 10, 0x666666, 0x333333);
-  grid.position.y = 0;
   scene.add(grid);
 
-  // ── SFERA ROSSA origine ──
-  const sphereGeo = new THREE.SphereGeometry(0.08, 12, 12);
-  const sphereMat = new THREE.MeshPhongMaterial({ color: 0xff0000 });
-  const sphere = new THREE.Mesh(sphereGeo, sphereMat);
-  sphere.position.set(0, 0, 0);
+  // Sfera origine
+  const sphere = new THREE.Mesh(
+    new THREE.SphereGeometry(0.08, 12, 12),
+    new THREE.MeshPhongMaterial({ color: 0xff0000 })
+  );
   scene.add(sphere);
 
-  // ── ASSI ── (X=rosso, Y=verde verticale, Z=blu)
-  const axes = new THREE.AxesHelper(0.5);
-  scene.add(axes);
+  // Assi
+  scene.add(new THREE.AxesHelper(0.5));
 
   window.addEventListener('resize', () => {
     cam3.aspect = window.innerWidth / window.innerHeight;
@@ -149,18 +258,41 @@ function initThree() {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  // Render loop
+  // Loop
   function loop() {
     requestAnimationFrame(loop);
+    if (IMU.ready) cam3.quaternion.copy(imuToCamQuat());
     renderer.render(scene, cam3);
+    document.getElementById('i-a').textContent = IMU.a.toFixed(1) + '°';
+    document.getElementById('i-b').textContent = IMU.b.toFixed(1) + '°';
+    document.getElementById('i-g').textContent = IMU.g.toFixed(1) + '°';
   }
   loop();
 }
 
+// ─────────────────────────────────────
+// BOOT
+// ─────────────────────────────────────
 document.getElementById('btn-start').addEventListener('click', async () => {
   document.getElementById('splash').style.display = 'none';
   const ok = await startCamera();
-  if (ok) initThree();
+  if (!ok) return;
+  setStatus('Camera OK — autorizza giroscopio');
+  initThree();
+
+  const needsPerm = typeof DeviceOrientationEvent !== 'undefined' &&
+                    typeof DeviceOrientationEvent.requestPermission === 'function';
+  if (needsPerm) {
+    document.getElementById('perm-modal').classList.add('show');
+  } else {
+    await requestGyro();
+  }
+});
+
+document.getElementById('btn-gyro').addEventListener('click', async () => {
+  document.getElementById('perm-modal').classList.remove('show');
+  const ok = await requestGyro();
+  if (!ok) setStatus('Giroscopio negato');
 });
 </script>
 </body>
