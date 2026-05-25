@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Step F — POSIT</title>
+<title>Step H — Modello completo</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family: Arial, sans-serif; background:#000; color:#fff; overflow:hidden; height:100dvh; width:100vw; }
@@ -11,12 +11,12 @@ body { font-family: Arial, sans-serif; background:#000; color:#fff; overflow:hid
 #splash {
   position:fixed; inset:0; z-index:100; background:#0a0a0f;
   display:flex; flex-direction:column; align-items:center; justify-content:center;
-  gap:1.5rem; padding:2rem; text-align:center;
+  gap:1.4rem; padding:2rem; text-align:center;
 }
 .version { font-size:.65rem; letter-spacing:.12em; opacity:.4; text-transform:uppercase; }
 h1 { font-size:2.4rem; letter-spacing:-.02em; text-transform:uppercase; }
 h1 span { color:#e8410a; }
-#splash p { font-size:.85rem; opacity:.6; max-width:320px; line-height:1.5; }
+#splash p { font-size:.82rem; opacity:.6; max-width:330px; line-height:1.5; }
 #splash label { font-size:.7rem; opacity:.7; display:flex; align-items:center; gap:.5rem; }
 #splash input { width:60px; padding:.3rem; background:#1a1a22; color:#fff; border:1px solid #333; font-family:Arial; font-size:.85rem; text-align:center; }
 button {
@@ -42,18 +42,28 @@ button:active { opacity:.8; }
 #info {
   position:fixed; bottom:1rem; left:1rem; right:1rem;
   background:rgba(10,10,15,.78); backdrop-filter:blur(10px);
-  padding:.65rem .85rem; font-size:.66rem; line-height:1.75;
+  padding:.65rem .85rem; font-size:.66rem; line-height:1.7;
   pointer-events:none; z-index:10; font-family: 'Courier New', monospace;
 }
 .kv { display:flex; justify-content:space-between; gap:1rem; }
 .kv span:first-child { opacity:.5; }
 
+#legend {
+  position:fixed; top:3.5rem; right:1rem;
+  background:rgba(10,10,15,.78); backdrop-filter:blur(10px);
+  padding:.5rem .7rem; font-size:.62rem; line-height:1.7;
+  pointer-events:none; z-index:10;
+}
+.legend-row { display:flex; align-items:center; gap:.5rem; }
+.legend-sw { width:12px; height:12px; border:1px solid rgba(255,255,255,.3); }
+
 .tb {
-  position:fixed; bottom:7.5rem; right:1rem;
+  position:fixed; bottom:6.5rem; right:1rem;
   background:rgba(10,10,15,.78); backdrop-filter:blur(10px);
   border:1px solid rgba(255,255,255,.15); color:#fff;
-  font-family:Arial; font-size:.65rem; letter-spacing:.06em; text-transform:uppercase;
-  padding:.55rem .9rem; cursor:pointer; z-index:11;
+  font-family:Arial; font-size:.62rem; letter-spacing:.06em; text-transform:uppercase;
+  padding:.45rem .75rem; cursor:pointer; z-index:11;
+  margin-bottom: .3rem; display:block;
 }
 .tb.on { border-color:#e8410a; color:#e8410a; }
 </style>
@@ -61,9 +71,9 @@ button:active { opacity:.8; }
 <body>
 
 <div id="splash">
-  <div class="version">v1.0.2 — fix Y inversion + Z-only flip</div>
-  <h1>STEP <span>F</span></h1>
-  <p>Un cubo virtuale verrà disegnato sopra il marker. Deve restare ancorato fisicamente al marker mentre muovi il telefono.</p>
+  <div class="version">v1.1 — Step H: modello completo</div>
+  <h1>STEP <span>H</span></h1>
+  <p>Il marker funziona come ancora del modello Rhino. Inquadrando un marker noto, l'intero edificio appare nello spazio attorno a te.</p>
   <label>
     Dim. marker (mm)
     <input type="number" id="marker-size" value="50" min="10" max="500">
@@ -80,18 +90,24 @@ button:active { opacity:.8; }
 
 <div id="status">In attesa…</div>
 
+<div id="legend">
+  <div class="legend-row"><div class="legend-sw" style="background:rgba(74,158,255,.5)"></div>Pilastri</div>
+  <div class="legend-row"><div class="legend-sw" style="background:rgba(255,140,46,.5)"></div>Travi</div>
+  <div class="legend-row"><div class="legend-sw" style="background:rgba(245,242,235,.3)"></div>Pareti</div>
+  <div class="legend-row"><div class="legend-sw" style="background:rgba(232,65,10,.8)"></div>Marker</div>
+</div>
+
 <div id="info">
   <div class="kv"><span>Marker ID</span><span id="i-id">—</span></div>
+  <div class="kv"><span>Elemento</span><span id="i-el">—</span></div>
   <div class="kv"><span>Distanza</span><span id="i-d">—</span></div>
-  <div class="kv"><span>Pos. cubo</span><span id="i-p">—</span></div>
-  <div class="kv"><span>FOV stimato</span><span id="i-fov">—</span></div>
+  <div class="kv"><span>Visti</span><span id="i-seen">—</span></div>
   <div class="kv"><span>FPS</span><span id="i-fps">—</span></div>
 </div>
 
 <script>
 // ═══════════════════════════════════════════════
 // ARUCO + POSIT (js-aruco2 v2.0.0 — MIT — inline)
-// Order: svd → cv → aruco → aruco_default → posit1
 // ═══════════════════════════════════════════════
 /*
 Copyright (c) 2012 Juan Mellado
@@ -2120,6 +2136,43 @@ POS.Pose = function(error1, rotation1, translation1, error2, rotation2, translat
 <script>
 'use strict';
 
+// ═══════════════════════════════════════════════
+// MODEL — sostituire con export Rhino
+// Coordinate Rhino: X=destra, Y=avanti, Z=alto. Unità: metri.
+// Ogni MARKER ha posizione e orientamento nel modello.
+//   ax, ay, az = posizione marker (centro) nel mondo Rhino
+//   normal     = direzione normale del marker (perpendicolare al piano)
+//                'up' = marker steso a terra, faccia verso il cielo
+//                'wall_+x', 'wall_-x', 'wall_+y', 'wall_-y' = parete con normale lungo asse
+// ═══════════════════════════════════════════════
+const MODEL = {
+  markers: [
+    // 4 marker, uno per pilastro, stesi a terra alla base del pilastro
+    { id: 0, name: 'PIL-A1', ax: 0, ay: 0, az: 0, normal: 'up', forward: 'y' },
+    { id: 1, name: 'PIL-A2', ax: 5, ay: 0, az: 0, normal: 'up', forward: 'y' },
+    { id: 2, name: 'PIL-B1', ax: 0, ay: 4, az: 0, normal: 'up', forward: 'y' },
+    { id: 3, name: 'PIL-B2', ax: 5, ay: 4, az: 0, normal: 'up', forward: 'y' },
+  ],
+  elements: [
+    { id:'PIL-A1', type:'column', x:0, y:0, z:0, h:3.2, r:0.15 },
+    { id:'PIL-A2', type:'column', x:5, y:0, z:0, h:3.2, r:0.15 },
+    { id:'PIL-B1', type:'column', x:0, y:4, z:0, h:3.2, r:0.15 },
+    { id:'PIL-B2', type:'column', x:5, y:4, z:0, h:3.2, r:0.15 },
+    { id:'TRV-1', type:'beam', x1:0, y1:0, x2:5, y2:0, z:3.2, w:0.25, h:0.45 },
+    { id:'TRV-2', type:'beam', x1:0, y1:4, x2:5, y2:4, z:3.2, w:0.25, h:0.45 },
+    { id:'TRV-3', type:'beam', x1:0, y1:0, x2:0, y2:4, z:3.2, w:0.25, h:0.45 },
+    { id:'TRV-4', type:'beam', x1:5, y1:0, x2:5, y2:4, z:3.2, w:0.25, h:0.45 },
+    { id:'PAR-1', type:'wall', x1:5, y1:0, x2:5, y2:4, z:0, h:3.2, t:0.2 },
+  ]
+};
+
+// Lookup
+const MARKER_MAP = {};
+MODEL.markers.forEach(m => { MARKER_MAP[m.id] = m; });
+
+// ═══════════════════════════════════════════════
+// CAMERA & TRACKING STATE
+// ═══════════════════════════════════════════════
 const video    = document.getElementById('cam');
 const overlay  = document.getElementById('overlay');
 const overCtx  = overlay.getContext('2d');
@@ -2128,15 +2181,15 @@ const workCtx  = work.getContext('2d', { willReadFrequently: true });
 const c3d      = document.getElementById('c3d');
 
 let detector, posit;
-let renderer, scene, cam3, markerCube;
-let MARKER_SIZE_M = 0.05; // metres — settable from splash
+let renderer, scene, cam3, modelGroup;
+let MARKER_SIZE_M = 0.05;
 let SHOW_2D = true;
 
 const STATE = {
   camOk:false, threeOk:false,
-  detectionsSeen: 0,
   fpsT:0, frameCount:0, fpsLast:0,
-  lastMarker: null,
+  seenIds: new Set(),
+  lastSeenT: 0,
 };
 
 function setStatus(t) { document.getElementById('status').textContent = t; }
@@ -2157,25 +2210,15 @@ async function startCamera() {
   } catch(e) { setStatus('Camera non disponibile'); return false; }
 }
 
-// ─────────────────────────────────────
-// VIDEO → SCREEN MAPPING (object-fit: cover)
-// ─────────────────────────────────────
 function getCoverTransform(vw, vh) {
   const sw = window.innerWidth, sh = window.innerHeight;
   const vA = vw/vh, sA = sw/sh;
   let scale, offX=0, offY=0;
   if (vA > sA) { scale = sh/vh; offX = (sw - vw*scale)/2; }
   else         { scale = sw/vw; offY = (sh - vh*scale)/2; }
-  return { scale, offX, offY, sw, sh, vw, vh };
+  return { scale, offX, offY };
 }
 
-function videoToScreen(px, py, T) {
-  return { x: px*T.scale + T.offX, y: py*T.scale + T.offY };
-}
-
-// ─────────────────────────────────────
-// 2D OVERLAY (marker outline)
-// ─────────────────────────────────────
 function resizeOverlay() {
   const dpr = window.devicePixelRatio || 1;
   overlay.width  = window.innerWidth  * dpr;
@@ -2189,25 +2232,25 @@ function draw2D(markers, T) {
   overCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
   if (!SHOW_2D || !markers || !markers.length) return;
   for (const m of markers) {
-    const pts = m.corners.map(c => videoToScreen(c.x, c.y, T));
+    const pts = m.corners.map(c => ({ x: c.x*T.scale + T.offX, y: c.y*T.scale + T.offY }));
     overCtx.beginPath();
     overCtx.moveTo(pts[0].x, pts[0].y);
     for (let i=1; i<4; i++) overCtx.lineTo(pts[i].x, pts[i].y);
     overCtx.closePath();
-    overCtx.strokeStyle = '#1a9e5c';
+    overCtx.strokeStyle = MARKER_MAP[m.id] ? '#1a9e5c' : '#f0a500';
     overCtx.lineWidth = 3;
     overCtx.stroke();
-    // numero corners (0 in rosso, gli altri verdi)
-    pts.forEach((p, i) => {
-      overCtx.fillStyle = i === 0 ? '#e8410a' : '#1a9e5c';
-      overCtx.beginPath(); overCtx.arc(p.x, p.y, 6, 0, Math.PI*2); overCtx.fill();
-    });
+    const cx = (pts[0].x+pts[2].x)/2, cy=(pts[0].y+pts[2].y)/2;
+    overCtx.fillStyle = 'rgba(0,0,0,.7)';
+    overCtx.fillRect(cx-22, cy-12, 44, 24);
+    overCtx.fillStyle = '#fff';
+    overCtx.font = 'bold 14px Arial'; overCtx.textAlign='center'; overCtx.textBaseline='middle';
+    overCtx.fillText(m.id, cx, cy);
   }
 }
 
 // ─────────────────────────────────────
-// THREE.JS — camera at origin, world fixed
-// We move objects relative to camera based on POSIT
+// THREE.JS SCENE — full Rhino model
 // ─────────────────────────────────────
 function initThree() {
   renderer = new THREE.WebGLRenderer({ canvas: c3d, alpha: true, antialias: true });
@@ -2216,36 +2259,22 @@ function initThree() {
   renderer.setClearColor(0, 0);
 
   scene = new THREE.Scene();
-
-  // Camera placed at world origin, looking down -Z (standard Three.js)
-  // We'll match its FOV to the real camera's FOV.
   cam3 = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.01, 100);
   cam3.position.set(0, 0, 0);
 
-  // Lights
   scene.add(new THREE.AmbientLight(0xffffff, 1.0));
   const dir = new THREE.DirectionalLight(0xffffff, 0.5);
   dir.position.set(2, 5, 3); scene.add(dir);
 
-  // Marker cube — sits in scene, will be repositioned each frame
-  // Cube edge = marker size, sitting on top of marker (centered above plane)
-  const s = MARKER_SIZE_M;
-  const cubeGeo = new THREE.BoxGeometry(s, s, s);
-  const cubeMat = new THREE.MeshPhongMaterial({ color: 0xe8410a, opacity: 0.7, transparent: true });
-  markerCube = new THREE.Mesh(cubeGeo, cubeMat);
-  // wireframe edges
-  const edges = new THREE.LineSegments(
-    new THREE.EdgesGeometry(cubeGeo),
-    new THREE.LineBasicMaterial({ color: 0xffffff })
-  );
-  markerCube.add(edges);
+  // modelGroup contains all model elements in RHINO coordinates.
+  // We transform the whole group based on the marker pose so that
+  // (0,0,0) in modelGroup maps to whatever world point the anchor marker
+  // says is the model origin.
+  modelGroup = new THREE.Group();
+  modelGroup.visible = false;
+  scene.add(modelGroup);
 
-  // Axis triad on the cube (corner 0 at the front)
-  const ax = new THREE.AxesHelper(s * 1.2);
-  markerCube.add(ax);
-
-  markerCube.visible = false;
-  scene.add(markerCube);
+  buildModel(modelGroup);
 
   STATE.threeOk = true;
 
@@ -2257,53 +2286,134 @@ function initThree() {
   });
 }
 
-// Update Three.js camera FOV to match the real focal length used by POSIT.
-// fy_pixels = (image_height/2) / tan(vFov/2)  →  vFov = 2 * atan((H/2) / fy)
-function syncFOV(focalPixels, imgH) {
-  const vFov = 2 * Math.atan((imgH/2) / focalPixels) * 180 / Math.PI;
-  if (Math.abs(cam3.fov - vFov) > 0.5) {
-    cam3.fov = vFov;
-    cam3.updateProjectionMatrix();
-    document.getElementById('i-fov').textContent = vFov.toFixed(1) + '°';
-  }
+// Build the model in its own coordinate system: Rhino convention
+// (X right, Y forward, Z up). The whole group will be rotated later
+// so that Rhino Z maps to Three.js Y.
+function buildModel(group) {
+  const COL = 0x4a9eff, BEAM = 0xff8c2e, WALL = 0xf5f2eb;
+
+  MODEL.elements.forEach(el => {
+    let mesh;
+    if (el.type === 'column') {
+      // CylinderGeometry has axis along Y by default. We want it along
+      // Rhino Z, which we'll handle by rotating below.
+      const g = new THREE.CylinderGeometry(el.r, el.r, el.h, 12);
+      mesh = new THREE.Mesh(g, new THREE.MeshPhongMaterial({
+        color: COL, opacity:.55, transparent:true
+      }));
+      mesh.rotation.x = Math.PI/2; // align Y → Z (Rhino vertical)
+      mesh.position.set(el.x, el.y, el.z + el.h/2);
+      const edges = new THREE.LineSegments(
+        new THREE.EdgesGeometry(g),
+        new THREE.LineBasicMaterial({ color:COL })
+      );
+      mesh.add(edges);
+
+    } else if (el.type === 'beam' || el.type === 'wall') {
+      const dx = el.x2-el.x1, dy = el.y2-el.y1;
+      const len = Math.hypot(dx, dy);
+      const w = el.type === 'beam' ? el.w : el.t;
+      const h = el.type === 'beam' ? el.h : el.h;
+      // Box: X = length, Y = width, Z = height
+      const g = new THREE.BoxGeometry(len, w, h);
+      const color = el.type === 'beam' ? BEAM : WALL;
+      const opacity = el.type === 'beam' ? .55 : .25;
+      mesh = new THREE.Mesh(g, new THREE.MeshPhongMaterial({
+        color, opacity, transparent:true
+      }));
+      mesh.position.set((el.x1+el.x2)/2, (el.y1+el.y2)/2, el.z + h/2);
+      mesh.rotation.z = Math.atan2(dy, dx);
+      const edges = new THREE.LineSegments(
+        new THREE.EdgesGeometry(g),
+        new THREE.LineBasicMaterial({ color })
+      );
+      mesh.add(edges);
+    }
+    if (mesh) {
+      mesh.userData.id = el.id;
+      group.add(mesh);
+    }
+  });
+
+  // Marker positions: small orange squares for visual reference
+  MODEL.markers.forEach(mk => {
+    const s = MARKER_SIZE_M;
+    const g = new THREE.BoxGeometry(s, s, 0.005);
+    const mesh = new THREE.Mesh(g, new THREE.MeshPhongMaterial({
+      color: 0xe8410a, opacity: 0.9, transparent: true
+    }));
+    mesh.position.set(mk.ax, mk.ay, mk.az);
+    group.add(mesh);
+  });
+
+  // Origin marker (red sphere) + axes
+  const originSphere = new THREE.Mesh(
+    new THREE.SphereGeometry(0.05, 8, 8),
+    new THREE.MeshPhongMaterial({ color: 0xff0000 })
+  );
+  group.add(originSphere);
+  group.add(new THREE.AxesHelper(0.3));
 }
 
 // ─────────────────────────────────────
-// POSIT → Three.js transform
+// POSE: marker → modelGroup transform
 // ─────────────────────────────────────
-// POSIT output:
-//   bestTranslation = [tx, ty, tz] — marker position in CAMERA frame
-//                                    POSIT camera: X→right, Y→up, Z→forward (into scene)
-//   bestRotation    = 3x3 matrix R such that  p_camera = R · p_marker + T
+// POSIT gives us: marker pose in CAMERA frame (in Three.js camera space
+// after our Z flip from previous step).
+// We want: modelGroup pose in WORLD (= camera) space such that the marker's
+// world position (ax, ay, az) lands exactly where POSIT says it should.
 //
-// Three.js camera frame: X→right, Y→up, Z→toward viewer (-Z forward)
+// Strategy: build a "marker mount" Object3D positioned at (ax, ay, az) of
+// the marker inside the model's Rhino frame, with orientation matching the
+// marker's physical orientation (e.g. flat on the floor with corner 0 pointing
+// in +Y direction). Then put the entire modelGroup as a child of this mount,
+// and finally transform the mount with the POSIT pose.
 //
-// Conversion: invert Y and Z of the camera frame.
-//   v_three = diag(1, -1, -1) · v_posit
+// Simpler equivalent: compute the marker→world transform (M_m2w) once per
+// marker config, then for each frame:
+//   modelGroup.matrix = pose_three  · M_m2w⁻¹
 //
-// For the full 4x4 transform from marker to Three.js camera:
-//   M_three = F · M_posit · F⁻¹     where F = diag(1,-1,-1,1)
-// But since we're transforming a point that lives in marker frame and we
-// want it in Three camera frame, we use:
-//   p_three = F · (R · p_marker_local + T)
-//
-// In Three.js terms: object position = F·T, object rotation = F·R·F
-// where F = flip Y and Z. This rewrite uses Three.js primitives directly.
+// (pose_three is the marker's pose in Three.js camera space.)
 
-function applyPose(pose) {
+// Pre-compute, for each known marker, the Rhino-frame matrix that places
+// a unit marker (XY plane, +Z normal, corner 0 at +X+Y, corner 1 at -X+Y,
+// corner 2 at -X-Y, corner 3 at +X-Y — js-aruco2 corner order) at the
+// marker's location in the model.
+function buildMarkerMounts() {
+  const mounts = {};
+  MODEL.markers.forEach(mk => {
+    // Local marker frame: X right, Y up (on marker plane), Z normal out.
+    // For a marker lying flat on the floor (normal='up'), the marker plane
+    // coincides with Rhino's XY (Z up). So the marker's local Z aligns with
+    // Rhino +Z. We may want the marker's local +Y to point in Rhino +Y
+    // (so the printed marker's "up" side points "forward" in the model).
+    const mount = new THREE.Matrix4();
+    if (mk.normal === 'up') {
+      // Marker XY plane = Rhino XY plane, marker +Z = Rhino +Z.
+      // The marker's local axes coincide with Rhino's. Identity rotation.
+      mount.makeTranslation(mk.ax, mk.ay, mk.az);
+    } else {
+      // Other orientations (walls) can be added later. Default to identity for now.
+      mount.makeTranslation(mk.ax, mk.ay, mk.az);
+    }
+    mounts[mk.id] = mount;
+  });
+  return mounts;
+}
+
+let MARKER_MOUNTS = null; // built once after MODEL is finalized
+
+// Convert POSIT pose to Three.js camera-space matrix (the marker's pose).
+// This is the SAME math as in Step F.
+function posit2three(pose) {
   const R = pose.bestRotation;
   const T = pose.bestTranslation;
 
-  // 1) Position: marker corners were already passed to POSIT with Y flipped
-  //    (y: vh/2 - c.y), so POSIT's translation Y is already in math-convention
-  //    (Y up). Only Z needs to flip for Three.js (POSIT Z forward → Three -Z).
-  markerCube.position.set( T[0], T[1], -T[2] );
+  // Position: Y already in math convention (we flipped corners on input),
+  // Z flipped (POSIT forward → Three -Z).
+  const pos = new THREE.Vector3(T[0], T[1], -T[2]);
 
-  // 2) Rotation: convert from POSIT camera (Y up, Z forward) to
-  //    Three.js camera (Y up, Z backward). The frames differ by a Z flip.
-  //    To convert a rotation matrix when one axis flips:
-  //      negate the entries that involve Z (third row and third column),
-  //      EXCEPT the (Z,Z) entry which gets negated twice = stays the same.
+  // Rotation: negate row 3 and col 3 (except [Z][Z]).
   const m = new THREE.Matrix4();
   m.set(
      R[0][0],  R[0][1], -R[0][2], 0,
@@ -2311,32 +2421,35 @@ function applyPose(pose) {
     -R[2][0], -R[2][1],  R[2][2], 0,
      0,        0,        0,       1
   );
+  m.setPosition(pos);
+  return m;
+}
 
-  const q = new THREE.Quaternion().setFromRotationMatrix(m);
-  markerCube.quaternion.copy(q);
+// Place the modelGroup so that the markerId's position in MODEL coincides
+// with where POSIT says the marker is in camera space.
+function applyAnchor(markerId, pose) {
+  const mount = MARKER_MOUNTS[markerId];
+  if (!mount) return;
 
-  // Reset to autoUpdate so position+quaternion compose normally
-  markerCube.matrixAutoUpdate = true;
+  const posit_three = posit2three(pose);
 
-  // Lift cube so its base sits ON the marker plane:
-  // The marker plane in marker-local coords is Z=0. After our flip, the marker plane
-  // normal in Three.js world becomes the local +Y of the cube? Actually no —
-  // the marker frame: X right, Y up (on marker plane), Z out (normal).
-  // After F·R·F, the marker normal in three-space is still the local Z of the cube.
-  // To put the cube ABOVE the marker, translate by half-size along the marker's normal.
-  // We do this by translating in the cube's LOCAL +Z direction (after rotation).
-  const localUp = new THREE.Vector3(0, 0, MARKER_SIZE_M / 2);
-  localUp.applyQuaternion(q);
-  markerCube.position.add(localUp);
+  // modelGroup transform: pose_in_camera · mount⁻¹
+  // i.e. take a point in model coordinates → apply mount⁻¹ → it's now in
+  // marker-local coords → apply pose_in_camera → it's in camera/world coords.
+  const mountInv = new THREE.Matrix4().copy(mount).invert();
+  const finalMatrix = new THREE.Matrix4().multiplyMatrices(posit_three, mountInv);
 
-  markerCube.visible = true;
+  modelGroup.matrixAutoUpdate = false;
+  modelGroup.matrix.copy(finalMatrix);
+  modelGroup.matrixWorldNeedsUpdate = true;
+  modelGroup.visible = true;
 }
 
 // ─────────────────────────────────────
-// DETECTION + RENDER LOOP
+// MAIN LOOP
 // ─────────────────────────────────────
 let lastDetect = 0;
-const DETECT_INTERVAL = 80; // ms
+const DETECT_INTERVAL = 80;
 
 function loop(now) {
   requestAnimationFrame(loop);
@@ -2350,49 +2463,58 @@ function loop(now) {
     work.width = vw; work.height = vh;
     workCtx.drawImage(video, 0, 0);
 
-    let img;
+    let img, markers;
     try { img = workCtx.getImageData(0, 0, vw, vh); } catch(e) { return; }
-
-    let markers;
     try { markers = detector.detect(img); } catch(e) { return; }
 
     const T = getCoverTransform(vw, vh);
     draw2D(markers, T);
 
-    if (markers && markers.length > 0) {
-      const m = markers[0];
-      STATE.lastMarker = m;
-      document.getElementById('i-id').textContent = m.id;
+    // Use the first KNOWN marker (one that's in MARKER_MAP)
+    let usedMarker = null;
+    if (markers && markers.length) {
+      for (const m of markers) {
+        if (MARKER_MAP[m.id]) { usedMarker = m; break; }
+      }
+    }
 
+    if (usedMarker) {
       // POSIT
-      // Focal length estimate for iPhone back camera: ~width * 0.85
       const focalPx = vw * 0.85;
       if (!posit) posit = new POS.Posit(MARKER_SIZE_M, focalPx);
-      // corners centered at image center, Y flipped to match POSIT convention
-      const corners = m.corners.map(c => ({ x: c.x - vw/2, y: vh/2 - c.y }));
+      const corners = usedMarker.corners.map(c => ({ x: c.x - vw/2, y: vh/2 - c.y }));
       let pose;
       try { pose = posit.pose(corners); } catch(e) { return; }
       if (pose) {
-        applyPose(pose);
-        syncFOV(focalPx, vh);
+        applyAnchor(usedMarker.id, pose);
+
+        const mk = MARKER_MAP[usedMarker.id];
+        STATE.seenIds.add(usedMarker.id);
+        STATE.lastSeenT = now;
         const T_ = pose.bestTranslation;
         const dist = Math.sqrt(T_[0]*T_[0]+T_[1]*T_[1]+T_[2]*T_[2]);
-        document.getElementById('i-d').textContent = dist.toFixed(2) + ' m';
-        const p = markerCube.matrix.elements; // m41, m42, m43 in column-major
-        document.getElementById('i-p').textContent =
-          `${p[12].toFixed(2)},${p[13].toFixed(2)},${p[14].toFixed(2)}`;
-        setStatus(`Marker ${m.id} — ${dist.toFixed(2)}m`);
-        STATE.detectionsSeen++;
+        document.getElementById('i-id').textContent = usedMarker.id;
+        document.getElementById('i-el').textContent = mk.name;
+        document.getElementById('i-d').textContent = dist.toFixed(2)+' m';
+        document.getElementById('i-seen').textContent =
+          `${STATE.seenIds.size}/${MODEL.markers.length}`;
+        setStatus(`Ancorato: ${mk.name}`);
+
+        // Sync FOV
+        const vFov = 2 * Math.atan((vh/2) / focalPx) * 180 / Math.PI;
+        if (Math.abs(cam3.fov - vFov) > 0.5) {
+          cam3.fov = vFov;
+          cam3.updateProjectionMatrix();
+        }
       }
     } else {
-      // Hide cube after a brief grace period (1 sec without detection)
-      if (now - lastDetect > 1000) markerCube.visible = false;
+      // No known marker visible; hide model after 1s grace period
+      if (now - STATE.lastSeenT > 1000) modelGroup.visible = false;
     }
   }
 
   renderer.render(scene, cam3);
 
-  // FPS
   STATE.frameCount++;
   if (now - STATE.fpsT > 1000) {
     STATE.fpsLast = STATE.frameCount;
@@ -2411,19 +2533,18 @@ document.getElementById('btn-start').addEventListener('click', async () => {
   resizeOverlay();
 
   if (typeof AR === 'undefined' || typeof POS === 'undefined') {
-    setStatus('ERR: ArUco/POSIT non caricati');
-    return;
+    setStatus('ERR: ArUco/POSIT non caricati'); return;
   }
   if (typeof THREE === 'undefined') {
-    setStatus('ERR: Three.js non caricato');
-    return;
+    setStatus('ERR: Three.js non caricato'); return;
   }
 
   detector = new AR.Detector();
   initThree();
+  MARKER_MOUNTS = buildMarkerMounts();
   const ok = await startCamera();
   if (!ok) return;
-  setStatus(`Pronto — marker ${(MARKER_SIZE_M*1000).toFixed(0)}mm — punta un marker`);
+  setStatus(`Pronto — marker ${(MARKER_SIZE_M*1000).toFixed(0)}mm — punta un marker (ID 0-3)`);
   requestAnimationFrame(loop);
 });
 
