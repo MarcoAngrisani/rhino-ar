@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Step E — ArUco</title>
+<title>Step F — POSIT</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family: Arial, sans-serif; background:#000; color:#fff; overflow:hidden; height:100dvh; width:100vw; }
@@ -17,6 +17,8 @@ body { font-family: Arial, sans-serif; background:#000; color:#fff; overflow:hid
 h1 { font-size:2.4rem; letter-spacing:-.02em; text-transform:uppercase; }
 h1 span { color:#e8410a; }
 #splash p { font-size:.85rem; opacity:.6; max-width:320px; line-height:1.5; }
+#splash label { font-size:.7rem; opacity:.7; display:flex; align-items:center; gap:.5rem; }
+#splash input { width:60px; padding:.3rem; background:#1a1a22; color:#fff; border:1px solid #333; font-family:Arial; font-size:.85rem; text-align:center; }
 button {
   background:#e8410a; color:#fff; border:none;
   padding:.9rem 2.4rem; font-family:Arial,sans-serif; font-size:1rem;
@@ -26,65 +28,71 @@ button {
 button:active { opacity:.8; }
 
 #cam { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; }
-#overlay { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; }
+#c3d { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:2; }
+#overlay { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:3; }
 
 #status {
   position:fixed; top:1rem; left:1rem; right:1rem;
   background:rgba(10,10,15,.78); backdrop-filter:blur(10px);
-  padding:.6rem .9rem; border-left:3px solid #e8410a;
-  font-size:.72rem; letter-spacing:.06em; text-transform:uppercase;
+  padding:.55rem .85rem; border-left:3px solid #e8410a;
+  font-size:.7rem; letter-spacing:.06em; text-transform:uppercase;
   pointer-events:none; z-index:10;
 }
 
 #info {
   position:fixed; bottom:1rem; left:1rem; right:1rem;
   background:rgba(10,10,15,.78); backdrop-filter:blur(10px);
-  padding:.7rem .9rem; font-size:.7rem; line-height:1.8;
+  padding:.65rem .85rem; font-size:.66rem; line-height:1.75;
   pointer-events:none; z-index:10; font-family: 'Courier New', monospace;
 }
 .kv { display:flex; justify-content:space-between; gap:1rem; }
-.kv span:first-child { opacity:.55; }
+.kv span:first-child { opacity:.5; }
 
-#big-id {
-  position:fixed; top:50%; left:50%;
-  transform: translate(-50%, -50%);
-  font-size: 7rem; font-weight: bold;
-  color: rgba(232, 65, 10, .9);
-  text-shadow: 0 0 30px rgba(0,0,0,.6);
-  pointer-events:none; z-index:9;
-  opacity:0; transition:opacity .2s;
-  font-family: Arial, sans-serif;
+.tb {
+  position:fixed; bottom:7.5rem; right:1rem;
+  background:rgba(10,10,15,.78); backdrop-filter:blur(10px);
+  border:1px solid rgba(255,255,255,.15); color:#fff;
+  font-family:Arial; font-size:.65rem; letter-spacing:.06em; text-transform:uppercase;
+  padding:.55rem .9rem; cursor:pointer; z-index:11;
 }
-#big-id.show { opacity:1; }
+.tb.on { border-color:#e8410a; color:#e8410a; }
 </style>
 </head>
 <body>
 
 <div id="splash">
-  <div class="version">v0.9.1 — Step E: ArUco fix loading</div>
-  <h1>STEP <span>E</span></h1>
-  <p>Test detection ArUco: punta un marker e l'ID viene riconosciuto a video. Niente Three.js, niente posa.</p>
+  <div class="version">v1.0 — Step F+G: POSIT + Three.js</div>
+  <h1>STEP <span>F</span></h1>
+  <p>Un cubo virtuale verrà disegnato sopra il marker. Deve restare ancorato fisicamente al marker mentre muovi il telefono.</p>
+  <label>
+    Dim. marker (mm)
+    <input type="number" id="marker-size" value="50" min="10" max="500">
+  </label>
   <button id="btn-start">AVVIA</button>
 </div>
 
 <video id="cam" autoplay playsinline muted></video>
+<canvas id="c3d"></canvas>
 <canvas id="overlay"></canvas>
 <canvas id="work" style="display:none"></canvas>
 
+<button class="tb" id="tb-2d">2D OVERLAY</button>
+
 <div id="status">In attesa…</div>
 
-<div id="big-id">—</div>
-
 <div id="info">
-  <div class="kv"><span>Risoluzione</span><span id="i-res">—</span></div>
-  <div class="kv"><span>FPS detection</span><span id="i-fps">—</span></div>
-  <div class="kv"><span>Marker visibili</span><span id="i-n">0</span></div>
-  <div class="kv"><span>Ultimo ID</span><span id="i-id">—</span></div>
+  <div class="kv"><span>Marker ID</span><span id="i-id">—</span></div>
+  <div class="kv"><span>Distanza</span><span id="i-d">—</span></div>
+  <div class="kv"><span>Pos. cubo</span><span id="i-p">—</span></div>
+  <div class="kv"><span>FOV stimato</span><span id="i-fov">—</span></div>
+  <div class="kv"><span>FPS</span><span id="i-fps">—</span></div>
 </div>
 
 <script>
-// ARUCO LIBRARY (js-aruco2 v2.0.0 — MIT — inline)
-// Order: svd → cv → aruco → aruco_default (dependency-correct)
+// ═══════════════════════════════════════════════
+// ARUCO + POSIT (js-aruco2 v2.0.0 — MIT — inline)
+// Order: svd → cv → aruco → aruco_default → posit1
+// ═══════════════════════════════════════════════
 /*
 Copyright (c) 2012 Juan Mellado
 
@@ -1609,8 +1617,505 @@ AR.DICTIONARIES['ARUCO_DEFAULT'] = {
   nBits: 25,
   tau: 3,
   codeList: [0x1084210,0x1084217,0x1084209,0x108420e,0x10842f0,0x10842f7,0x10842e9,0x10842ee,0x1084130,0x1084137,0x1084129,0x108412e,0x10841d0,0x10841d7,0x10841c9,0x10841ce,0x1085e10,0x1085e17,0x1085e09,0x1085e0e,0x1085ef0,0x1085ef7,0x1085ee9,0x1085eee,0x1085d30,0x1085d37,0x1085d29,0x1085d2e,0x1085dd0,0x1085dd7,0x1085dc9,0x1085dce,0x1082610,0x1082617,0x1082609,0x108260e,0x10826f0,0x10826f7,0x10826e9,0x10826ee,0x1082530,0x1082537,0x1082529,0x108252e,0x10825d0,0x10825d7,0x10825c9,0x10825ce,0x1083a10,0x1083a17,0x1083a09,0x1083a0e,0x1083af0,0x1083af7,0x1083ae9,0x1083aee,0x1083930,0x1083937,0x1083929,0x108392e,0x10839d0,0x10839d7,0x10839c9,0x10839ce,0x10bc210,0x10bc217,0x10bc209,0x10bc20e,0x10bc2f0,0x10bc2f7,0x10bc2e9,0x10bc2ee,0x10bc130,0x10bc137,0x10bc129,0x10bc12e,0x10bc1d0,0x10bc1d7,0x10bc1c9,0x10bc1ce,0x10bde10,0x10bde17,0x10bde09,0x10bde0e,0x10bdef0,0x10bdef7,0x10bdee9,0x10bdeee,0x10bdd30,0x10bdd37,0x10bdd29,0x10bdd2e,0x10bddd0,0x10bddd7,0x10bddc9,0x10bddce,0x10ba610,0x10ba617,0x10ba609,0x10ba60e,0x10ba6f0,0x10ba6f7,0x10ba6e9,0x10ba6ee,0x10ba530,0x10ba537,0x10ba529,0x10ba52e,0x10ba5d0,0x10ba5d7,0x10ba5c9,0x10ba5ce,0x10bba10,0x10bba17,0x10bba09,0x10bba0e,0x10bbaf0,0x10bbaf7,0x10bbae9,0x10bbaee,0x10bb930,0x10bb937,0x10bb929,0x10bb92e,0x10bb9d0,0x10bb9d7,0x10bb9c9,0x10bb9ce,0x104c210,0x104c217,0x104c209,0x104c20e,0x104c2f0,0x104c2f7,0x104c2e9,0x104c2ee,0x104c130,0x104c137,0x104c129,0x104c12e,0x104c1d0,0x104c1d7,0x104c1c9,0x104c1ce,0x104de10,0x104de17,0x104de09,0x104de0e,0x104def0,0x104def7,0x104dee9,0x104deee,0x104dd30,0x104dd37,0x104dd29,0x104dd2e,0x104ddd0,0x104ddd7,0x104ddc9,0x104ddce,0x104a610,0x104a617,0x104a609,0x104a60e,0x104a6f0,0x104a6f7,0x104a6e9,0x104a6ee,0x104a530,0x104a537,0x104a529,0x104a52e,0x104a5d0,0x104a5d7,0x104a5c9,0x104a5ce,0x104ba10,0x104ba17,0x104ba09,0x104ba0e,0x104baf0,0x104baf7,0x104bae9,0x104baee,0x104b930,0x104b937,0x104b929,0x104b92e,0x104b9d0,0x104b9d7,0x104b9c9,0x104b9ce,0x1074210,0x1074217,0x1074209,0x107420e,0x10742f0,0x10742f7,0x10742e9,0x10742ee,0x1074130,0x1074137,0x1074129,0x107412e,0x10741d0,0x10741d7,0x10741c9,0x10741ce,0x1075e10,0x1075e17,0x1075e09,0x1075e0e,0x1075ef0,0x1075ef7,0x1075ee9,0x1075eee,0x1075d30,0x1075d37,0x1075d29,0x1075d2e,0x1075dd0,0x1075dd7,0x1075dc9,0x1075dce,0x1072610,0x1072617,0x1072609,0x107260e,0x10726f0,0x10726f7,0x10726e9,0x10726ee,0x1072530,0x1072537,0x1072529,0x107252e,0x10725d0,0x10725d7,0x10725c9,0x10725ce,0x1073a10,0x1073a17,0x1073a09,0x1073a0e,0x1073af0,0x1073af7,0x1073ae9,0x1073aee,0x1073930,0x1073937,0x1073929,0x107392e,0x10739d0,0x10739d7,0x10739c9,0x10739ce,0x1784210,0x1784217,0x1784209,0x178420e,0x17842f0,0x17842f7,0x17842e9,0x17842ee,0x1784130,0x1784137,0x1784129,0x178412e,0x17841d0,0x17841d7,0x17841c9,0x17841ce,0x1785e10,0x1785e17,0x1785e09,0x1785e0e,0x1785ef0,0x1785ef7,0x1785ee9,0x1785eee,0x1785d30,0x1785d37,0x1785d29,0x1785d2e,0x1785dd0,0x1785dd7,0x1785dc9,0x1785dce,0x1782610,0x1782617,0x1782609,0x178260e,0x17826f0,0x17826f7,0x17826e9,0x17826ee,0x1782530,0x1782537,0x1782529,0x178252e,0x17825d0,0x17825d7,0x17825c9,0x17825ce,0x1783a10,0x1783a17,0x1783a09,0x1783a0e,0x1783af0,0x1783af7,0x1783ae9,0x1783aee,0x1783930,0x1783937,0x1783929,0x178392e,0x17839d0,0x17839d7,0x17839c9,0x17839ce,0x17bc210,0x17bc217,0x17bc209,0x17bc20e,0x17bc2f0,0x17bc2f7,0x17bc2e9,0x17bc2ee,0x17bc130,0x17bc137,0x17bc129,0x17bc12e,0x17bc1d0,0x17bc1d7,0x17bc1c9,0x17bc1ce,0x17bde10,0x17bde17,0x17bde09,0x17bde0e,0x17bdef0,0x17bdef7,0x17bdee9,0x17bdeee,0x17bdd30,0x17bdd37,0x17bdd29,0x17bdd2e,0x17bddd0,0x17bddd7,0x17bddc9,0x17bddce,0x17ba610,0x17ba617,0x17ba609,0x17ba60e,0x17ba6f0,0x17ba6f7,0x17ba6e9,0x17ba6ee,0x17ba530,0x17ba537,0x17ba529,0x17ba52e,0x17ba5d0,0x17ba5d7,0x17ba5c9,0x17ba5ce,0x17bba10,0x17bba17,0x17bba09,0x17bba0e,0x17bbaf0,0x17bbaf7,0x17bbae9,0x17bbaee,0x17bb930,0x17bb937,0x17bb929,0x17bb92e,0x17bb9d0,0x17bb9d7,0x17bb9c9,0x17bb9ce,0x174c210,0x174c217,0x174c209,0x174c20e,0x174c2f0,0x174c2f7,0x174c2e9,0x174c2ee,0x174c130,0x174c137,0x174c129,0x174c12e,0x174c1d0,0x174c1d7,0x174c1c9,0x174c1ce,0x174de10,0x174de17,0x174de09,0x174de0e,0x174def0,0x174def7,0x174dee9,0x174deee,0x174dd30,0x174dd37,0x174dd29,0x174dd2e,0x174ddd0,0x174ddd7,0x174ddc9,0x174ddce,0x174a610,0x174a617,0x174a609,0x174a60e,0x174a6f0,0x174a6f7,0x174a6e9,0x174a6ee,0x174a530,0x174a537,0x174a529,0x174a52e,0x174a5d0,0x174a5d7,0x174a5c9,0x174a5ce,0x174ba10,0x174ba17,0x174ba09,0x174ba0e,0x174baf0,0x174baf7,0x174bae9,0x174baee,0x174b930,0x174b937,0x174b929,0x174b92e,0x174b9d0,0x174b9d7,0x174b9c9,0x174b9ce,0x1774210,0x1774217,0x1774209,0x177420e,0x17742f0,0x17742f7,0x17742e9,0x17742ee,0x1774130,0x1774137,0x1774129,0x177412e,0x17741d0,0x17741d7,0x17741c9,0x17741ce,0x1775e10,0x1775e17,0x1775e09,0x1775e0e,0x1775ef0,0x1775ef7,0x1775ee9,0x1775eee,0x1775d30,0x1775d37,0x1775d29,0x1775d2e,0x1775dd0,0x1775dd7,0x1775dc9,0x1775dce,0x1772610,0x1772617,0x1772609,0x177260e,0x17726f0,0x17726f7,0x17726e9,0x17726ee,0x1772530,0x1772537,0x1772529,0x177252e,0x17725d0,0x17725d7,0x17725c9,0x17725ce,0x1773a10,0x1773a17,0x1773a09,0x1773a0e,0x1773af0,0x1773af7,0x1773ae9,0x1773aee,0x1773930,0x1773937,0x1773929,0x177392e,0x17739d0,0x17739d7,0x17739c9,0x17739ce,0x984210,0x984217,0x984209,0x98420e,0x9842f0,0x9842f7,0x9842e9,0x9842ee,0x984130,0x984137,0x984129,0x98412e,0x9841d0,0x9841d7,0x9841c9,0x9841ce,0x985e10,0x985e17,0x985e09,0x985e0e,0x985ef0,0x985ef7,0x985ee9,0x985eee,0x985d30,0x985d37,0x985d29,0x985d2e,0x985dd0,0x985dd7,0x985dc9,0x985dce,0x982610,0x982617,0x982609,0x98260e,0x9826f0,0x9826f7,0x9826e9,0x9826ee,0x982530,0x982537,0x982529,0x98252e,0x9825d0,0x9825d7,0x9825c9,0x9825ce,0x983a10,0x983a17,0x983a09,0x983a0e,0x983af0,0x983af7,0x983ae9,0x983aee,0x983930,0x983937,0x983929,0x98392e,0x9839d0,0x9839d7,0x9839c9,0x9839ce,0x9bc210,0x9bc217,0x9bc209,0x9bc20e,0x9bc2f0,0x9bc2f7,0x9bc2e9,0x9bc2ee,0x9bc130,0x9bc137,0x9bc129,0x9bc12e,0x9bc1d0,0x9bc1d7,0x9bc1c9,0x9bc1ce,0x9bde10,0x9bde17,0x9bde09,0x9bde0e,0x9bdef0,0x9bdef7,0x9bdee9,0x9bdeee,0x9bdd30,0x9bdd37,0x9bdd29,0x9bdd2e,0x9bddd0,0x9bddd7,0x9bddc9,0x9bddce,0x9ba610,0x9ba617,0x9ba609,0x9ba60e,0x9ba6f0,0x9ba6f7,0x9ba6e9,0x9ba6ee,0x9ba530,0x9ba537,0x9ba529,0x9ba52e,0x9ba5d0,0x9ba5d7,0x9ba5c9,0x9ba5ce,0x9bba10,0x9bba17,0x9bba09,0x9bba0e,0x9bbaf0,0x9bbaf7,0x9bbae9,0x9bbaee,0x9bb930,0x9bb937,0x9bb929,0x9bb92e,0x9bb9d0,0x9bb9d7,0x9bb9c9,0x9bb9ce,0x94c210,0x94c217,0x94c209,0x94c20e,0x94c2f0,0x94c2f7,0x94c2e9,0x94c2ee,0x94c130,0x94c137,0x94c129,0x94c12e,0x94c1d0,0x94c1d7,0x94c1c9,0x94c1ce,0x94de10,0x94de17,0x94de09,0x94de0e,0x94def0,0x94def7,0x94dee9,0x94deee,0x94dd30,0x94dd37,0x94dd29,0x94dd2e,0x94ddd0,0x94ddd7,0x94ddc9,0x94ddce,0x94a610,0x94a617,0x94a609,0x94a60e,0x94a6f0,0x94a6f7,0x94a6e9,0x94a6ee,0x94a530,0x94a537,0x94a529,0x94a52e,0x94a5d0,0x94a5d7,0x94a5c9,0x94a5ce,0x94ba10,0x94ba17,0x94ba09,0x94ba0e,0x94baf0,0x94baf7,0x94bae9,0x94baee,0x94b930,0x94b937,0x94b929,0x94b92e,0x94b9d0,0x94b9d7,0x94b9c9,0x94b9ce,0x974210,0x974217,0x974209,0x97420e,0x9742f0,0x9742f7,0x9742e9,0x9742ee,0x974130,0x974137,0x974129,0x97412e,0x9741d0,0x9741d7,0x9741c9,0x9741ce,0x975e10,0x975e17,0x975e09,0x975e0e,0x975ef0,0x975ef7,0x975ee9,0x975eee,0x975d30,0x975d37,0x975d29,0x975d2e,0x975dd0,0x975dd7,0x975dc9,0x975dce,0x972610,0x972617,0x972609,0x97260e,0x9726f0,0x9726f7,0x9726e9,0x9726ee,0x972530,0x972537,0x972529,0x97252e,0x9725d0,0x9725d7,0x9725c9,0x9725ce,0x973a10,0x973a17,0x973a09,0x973a0e,0x973af0,0x973af7,0x973ae9,0x973aee,0x973930,0x973937,0x973929,0x97392e,0x9739d0,0x9739d7,0x9739c9,0x9739ce,0xe84210,0xe84217,0xe84209,0xe8420e,0xe842f0,0xe842f7,0xe842e9,0xe842ee,0xe84130,0xe84137,0xe84129,0xe8412e,0xe841d0,0xe841d7,0xe841c9,0xe841ce,0xe85e10,0xe85e17,0xe85e09,0xe85e0e,0xe85ef0,0xe85ef7,0xe85ee9,0xe85eee,0xe85d30,0xe85d37,0xe85d29,0xe85d2e,0xe85dd0,0xe85dd7,0xe85dc9,0xe85dce,0xe82610,0xe82617,0xe82609,0xe8260e,0xe826f0,0xe826f7,0xe826e9,0xe826ee,0xe82530,0xe82537,0xe82529,0xe8252e,0xe825d0,0xe825d7,0xe825c9,0xe825ce,0xe83a10,0xe83a17,0xe83a09,0xe83a0e,0xe83af0,0xe83af7,0xe83ae9,0xe83aee,0xe83930,0xe83937,0xe83929,0xe8392e,0xe839d0,0xe839d7,0xe839c9,0xe839ce,0xebc210,0xebc217,0xebc209,0xebc20e,0xebc2f0,0xebc2f7,0xebc2e9,0xebc2ee,0xebc130,0xebc137,0xebc129,0xebc12e,0xebc1d0,0xebc1d7,0xebc1c9,0xebc1ce,0xebde10,0xebde17,0xebde09,0xebde0e,0xebdef0,0xebdef7,0xebdee9,0xebdeee,0xebdd30,0xebdd37,0xebdd29,0xebdd2e,0xebddd0,0xebddd7,0xebddc9,0xebddce,0xeba610,0xeba617,0xeba609,0xeba60e,0xeba6f0,0xeba6f7,0xeba6e9,0xeba6ee,0xeba530,0xeba537,0xeba529,0xeba52e,0xeba5d0,0xeba5d7,0xeba5c9,0xeba5ce,0xebba10,0xebba17,0xebba09,0xebba0e,0xebbaf0,0xebbaf7,0xebbae9,0xebbaee,0xebb930,0xebb937,0xebb929,0xebb92e,0xebb9d0,0xebb9d7,0xebb9c9,0xebb9ce,0xe4c210,0xe4c217,0xe4c209,0xe4c20e,0xe4c2f0,0xe4c2f7,0xe4c2e9,0xe4c2ee,0xe4c130,0xe4c137,0xe4c129,0xe4c12e,0xe4c1d0,0xe4c1d7,0xe4c1c9,0xe4c1ce,0xe4de10,0xe4de17,0xe4de09,0xe4de0e,0xe4def0,0xe4def7,0xe4dee9,0xe4deee,0xe4dd30,0xe4dd37,0xe4dd29,0xe4dd2e,0xe4ddd0,0xe4ddd7,0xe4ddc9,0xe4ddce,0xe4a610,0xe4a617,0xe4a609,0xe4a60e,0xe4a6f0,0xe4a6f7,0xe4a6e9,0xe4a6ee,0xe4a530,0xe4a537,0xe4a529,0xe4a52e,0xe4a5d0,0xe4a5d7,0xe4a5c9,0xe4a5ce,0xe4ba10,0xe4ba17,0xe4ba09,0xe4ba0e,0xe4baf0,0xe4baf7,0xe4bae9,0xe4baee,0xe4b930,0xe4b937,0xe4b929,0xe4b92e,0xe4b9d0,0xe4b9d7,0xe4b9c9,0xe4b9ce,0xe74210,0xe74217,0xe74209,0xe7420e,0xe742f0,0xe742f7,0xe742e9,0xe742ee,0xe74130,0xe74137,0xe74129,0xe7412e,0xe741d0,0xe741d7,0xe741c9,0xe741ce,0xe75e10,0xe75e17,0xe75e09,0xe75e0e,0xe75ef0,0xe75ef7,0xe75ee9,0xe75eee,0xe75d30,0xe75d37,0xe75d29,0xe75d2e,0xe75dd0,0xe75dd7,0xe75dc9,0xe75dce,0xe72610,0xe72617,0xe72609,0xe7260e,0xe726f0,0xe726f7,0xe726e9,0xe726ee,0xe72530,0xe72537,0xe72529,0xe7252e,0xe725d0,0xe725d7,0xe725c9,0xe725ce,0xe73a10,0xe73a17,0xe73a09,0xe73a0e,0xe73af0,0xe73af7,0xe73ae9,0xe73aee,0xe73930,0xe73937,0xe73929,0xe7392e,0xe739d0,0xe739d7,0xe739c9]
+};/*
+Copyright (c) 2012 Juan Mellado
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
+/*
+References:
+- "Iterative Pose Estimation using Coplanar Feature Points"
+  Denis Oberkampf, Daniel F. DeMenthon, Larry S. Davis
+  http://www.cfar.umd.edu/~daniel/daniel_papersfordownload/CoplanarPts.pdf
+*/
+
+var POS = POS || {};
+this.POS = POS;
+
+var SVD = this.SVD || require('./svd').SVD;
+
+POS.Posit = function(modelSize, focalLength){
+  this.objectPoints = this.buildModel(modelSize);
+  this.focalLength = focalLength;
+
+  this.objectVectors = [];
+  this.objectNormal = [];
+  this.objectMatrix = [[],[],[]];
+  
+  this.init();
 };
+
+POS.Posit.prototype.buildModel = function(modelSize){
+  var half = modelSize / 2.0;
+  
+  return [
+    [-half,  half, 0.0],
+    [ half,  half, 0.0],
+    [ half, -half, 0.0],
+    [-half, -half, 0.0] ];
+};
+
+POS.Posit.prototype.init = function(){
+  var np = this.objectPoints.length,
+      vectors = [], n = [], len = 0.0, row = 2, i;
+  
+  for (i = 0; i < np; ++ i){
+    this.objectVectors[i] = [this.objectPoints[i][0] - this.objectPoints[0][0],
+                             this.objectPoints[i][1] - this.objectPoints[0][1],
+                             this.objectPoints[i][2] - this.objectPoints[0][2]];
+                             
+    vectors[i] = [this.objectVectors[i][0],
+                  this.objectVectors[i][1],
+                  this.objectVectors[i][2]];
+  }
+
+  while(0.0 === len){
+    n[0] = this.objectVectors[1][1] * this.objectVectors[row][2] -
+           this.objectVectors[1][2] * this.objectVectors[row][1];
+    n[1] = this.objectVectors[1][2] * this.objectVectors[row][0] -
+           this.objectVectors[1][0] * this.objectVectors[row][2];
+    n[2] = this.objectVectors[1][0] * this.objectVectors[row][1] -
+           this.objectVectors[1][1] * this.objectVectors[row][0];
+    
+    len = Math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+    
+    ++ row;
+  }
+
+  for (i = 0; i < 3; ++ i){
+    this.objectNormal[i] = n[i] / len;
+  }
+
+  POS.pseudoInverse(vectors, np, this.objectMatrix);
+};
+
+POS.Posit.prototype.pose = function(imagePoints){
+  var posRotation1 = [[],[],[]], posRotation2 = [[],[],[]], posTranslation = [],
+      rotation1 = [[],[],[]], rotation2 = [[],[],[]], translation1 = [], translation2 = [],
+      error1, error2, valid1, valid2, i, j;
+
+  this.pos(imagePoints, posRotation1, posRotation2, posTranslation);
+
+  valid1 = this.isValid(posRotation1, posTranslation);
+  if (valid1){
+    error1 = this.iterate(imagePoints, posRotation1, posTranslation, rotation1, translation1);
+  }else{
+    error1 = {euclidean: -1.0, pixels: -1, maximum: -1.0};
+  }
+  
+  valid2 = this.isValid(posRotation2, posTranslation);
+  if (valid2){
+    error2 = this.iterate(imagePoints, posRotation2, posTranslation, rotation2, translation2);
+  }else{
+    error2 = {euclidean: -1.0, pixels: -1, maximum: -1.0};
+  }
+
+  for (i = 0; i < 3; ++ i){
+    for (j = 0; j < 3; ++ j){
+      if (valid1){
+        translation1[i] -= rotation1[i][j] * this.objectPoints[0][j];
+      }
+      if (valid2){
+        translation2[i] -= rotation2[i][j] * this.objectPoints[0][j];
+      }
+    }
+  }
+
+  return error1.euclidean < error2.euclidean?
+    new POS.Pose(error1.pixels, rotation1, translation1, error2.pixels, rotation2, translation2):
+    new POS.Pose(error2.pixels, rotation2, translation2, error1.pixels, rotation1, translation1);
+};
+
+POS.Posit.prototype.pos = function(imagePoints, rotation1, rotation2, translation){
+  var np = this.objectPoints.length, imageVectors = [],
+      i0 = [], j0 = [], ivec = [], jvec = [], row1 = [], row2 = [], row3 = [],
+      i0i0, j0j0, i0j0, delta, q, lambda, mu, scale, i, j;
+
+  for (i = 0; i < np; ++ i){
+    imageVectors[i] = [imagePoints[i].x - imagePoints[0].x,
+                       imagePoints[i].y - imagePoints[0].y];
+  }
+
+  //i0 and j0
+  for (i = 0; i < 3; ++ i){
+    i0[i] = 0.0;
+    j0[i] = 0.0;
+    for (j = 0; j < np; ++ j){
+      i0[i] += this.objectMatrix[i][j] * imageVectors[j][0];
+      j0[i] += this.objectMatrix[i][j] * imageVectors[j][1];
+    }
+  }
+
+  i0i0 = i0[0] * i0[0] + i0[1] * i0[1] + i0[2] * i0[2];
+  j0j0 = j0[0] * j0[0] + j0[1] * j0[1] + j0[2] * j0[2];
+  i0j0 = i0[0] * j0[0] + i0[1] * j0[1] + i0[2] * j0[2];
+
+  //Lambda and mu
+  delta = (j0j0 - i0i0) * (j0j0 - i0i0) + 4.0 * (i0j0 * i0j0);
+  
+  if (j0j0 - i0i0 >= 0.0){
+    q = (j0j0 - i0i0 + Math.sqrt(delta) ) / 2.0;
+  }else{
+    q = (j0j0 - i0i0 - Math.sqrt(delta) ) / 2.0;
+  }
+  
+  if (q >= 0.0){
+    lambda = Math.sqrt(q);
+    if (0.0 === lambda){
+      mu = 0.0;
+    }else{
+      mu = -i0j0 / lambda;
+    }
+  }else{
+    lambda = Math.sqrt( -(i0j0 * i0j0) / q);
+    if (0.0 === lambda){
+      mu = Math.sqrt(i0i0 - j0j0);
+    }else{
+      mu = -i0j0 / lambda;
+    }
+  }
+
+  //First rotation
+  for (i = 0; i < 3; ++ i){
+    ivec[i] = i0[i] + lambda * this.objectNormal[i];
+    jvec[i] = j0[i] + mu * this.objectNormal[i];
+  }
+  
+  scale = Math.sqrt(ivec[0] * ivec[0] + ivec[1] * ivec[1] + ivec[2] * ivec[2]);
+  
+  for (i = 0; i < 3; ++ i){
+    row1[i] = ivec[i] / scale;
+    row2[i] = jvec[i] / scale;
+  }
+  
+  row3[0] = row1[1] * row2[2] - row1[2] * row2[1];
+  row3[1] = row1[2] * row2[0] - row1[0] * row2[2];
+  row3[2] = row1[0] * row2[1] - row1[1] * row2[0];
+
+  for (i = 0; i < 3; ++ i){
+    rotation1[0][i] = row1[i];
+    rotation1[1][i] = row2[i];
+    rotation1[2][i] = row3[i];
+  }
+
+  //Second rotation
+  for (i = 0; i < 3; ++ i){
+    ivec[i] = i0[i] - lambda * this.objectNormal[i];
+    jvec[i] = j0[i] - mu * this.objectNormal[i];
+  }
+  
+  for (i = 0; i < 3; ++ i){
+    row1[i] = ivec[i] / scale;
+    row2[i] = jvec[i] / scale;
+  }
+  
+  row3[0] = row1[1] * row2[2] - row1[2] * row2[1];
+  row3[1] = row1[2] * row2[0] - row1[0] * row2[2];
+  row3[2] = row1[0] * row2[1] - row1[1] * row2[0];
+  
+  for (i = 0; i < 3; ++ i){
+    rotation2[0][i] = row1[i];
+    rotation2[1][i] = row2[i];
+    rotation2[2][i] = row3[i];
+  }
+
+  //Translation
+  translation[0] = imagePoints[0].x / scale;
+  translation[1] = imagePoints[0].y / scale;
+  translation[2] = this.focalLength / scale;
+};
+
+POS.Posit.prototype.isValid = function(rotation, translation){
+  var np = this.objectPoints.length, zmin = Infinity, i = 0, zi;
+
+  for (; i < np; ++ i){
+    zi = translation[2] +
+      (rotation[2][0] * this.objectVectors[i][0] +
+       rotation[2][1] * this.objectVectors[i][1] +
+       rotation[2][2] * this.objectVectors[i][2]);
+    if (zi < zmin){
+      zmin = zi;
+    }
+  }
+
+  return zmin >= 0.0;
+};
+
+POS.Posit.prototype.iterate = function(imagePoints, posRotation, posTranslation, rotation, translation){
+  var np = this.objectPoints.length,
+      oldSopImagePoints = [], sopImagePoints = [],
+      rotation1 = [[],[],[]], rotation2 = [[],[],[]],
+      translation1 = [], translation2 = [],
+      converged = false, iteration = 0,
+      oldImageDifference, imageDifference, factor,
+      error, error1, error2, delta, i, j;
+
+  for (i = 0; i < np; ++ i){
+    oldSopImagePoints[i] = {x: imagePoints[i].x,
+                            y: imagePoints[i].y};
+  }
+  
+  for (i = 0; i < 3; ++ i){
+    for (j = 0; j < 3; ++ j){
+      rotation[i][j] = posRotation[i][j];
+    }
+    translation[i] = posTranslation[i];
+  }
+
+  for (i = 0; i < np; ++ i){
+    factor = 0.0;
+    for (j = 0; j < 3; ++ j){
+      factor += this.objectVectors[i][j] * rotation[2][j] / translation[2];
+    }
+    sopImagePoints[i] = {x: (1.0 + factor) * imagePoints[i].x,
+                         y: (1.0 + factor) * imagePoints[i].y};
+  }
+
+  imageDifference = 0.0;
+  
+  for (i = 0; i < np; ++ i){
+    imageDifference += Math.abs(sopImagePoints[i].x - oldSopImagePoints[i].x);
+    imageDifference += Math.abs(sopImagePoints[i].y - oldSopImagePoints[i].y);
+  }
+
+  for (i = 0; i < 3; ++ i){
+    translation1[i] = translation[i] -
+      (rotation[i][0] * this.objectPoints[0][0] +
+       rotation[i][1] * this.objectPoints[0][1] +
+       rotation[i][2] * this.objectPoints[0][2]);
+  }
+  
+  error = error1 = this.error(imagePoints, rotation, translation1);
+
+  //Convergence
+  converged = (0.0 === error1.pixels) || (imageDifference < 0.01);
+  
+  while( iteration ++ < 100 && !converged ){
+  
+    for (i = 0; i < np; ++ i){
+      oldSopImagePoints[i].x = sopImagePoints[i].x;
+      oldSopImagePoints[i].y = sopImagePoints[i].y;
+    }
+
+    this.pos(sopImagePoints, rotation1, rotation2, translation);
+
+    for (i = 0; i < 3; ++ i){
+      translation1[i] = translation[i] -
+        (rotation1[i][0] * this.objectPoints[0][0] +
+         rotation1[i][1] * this.objectPoints[0][1] +
+         rotation1[i][2] * this.objectPoints[0][2]);
+        
+      translation2[i] = translation[i] -
+        (rotation2[i][0] * this.objectPoints[0][0] +
+         rotation2[i][1] * this.objectPoints[0][1] +
+         rotation2[i][2] * this.objectPoints[0][2]);
+    }
+
+    error1 = this.error(imagePoints, rotation1, translation1);
+    error2 = this.error(imagePoints, rotation2, translation2);
+
+    if ( (error1.euclidean >= 0.0) && (error2.euclidean >= 0.0) ){
+      if (error2.euclidean < error1.euclidean){
+        error = error2;
+        for (i = 0; i < 3; ++ i){
+          for (j = 0; j < 3; ++ j){
+            rotation[i][j] = rotation2[i][j];
+          }
+        }
+      }else{
+        error = error1;
+        for (i = 0; i < 3; ++ i){
+          for (j = 0; j < 3; ++ j){
+            rotation[i][j] = rotation1[i][j];
+          }
+        }
+      }
+    }
+
+    if ( (error1.euclidean < 0.0) && (error2.euclidean >= 0.0) ){
+      error = error2;
+      for (i = 0; i < 3; ++ i){
+        for (j = 0; j < 3; ++ j){
+          rotation[i][j] = rotation2[i][j];
+        }
+      }
+    }
+    
+    if ( (error2.euclidean < 0.0) && (error1.euclidean >= 0.0) ){
+      error = error1;
+      for (i = 0; i < 3; ++ i){
+        for (j = 0; j < 3; ++ j){
+          rotation[i][j] = rotation1[i][j];
+        }
+      }
+    }
+
+    for (i = 0; i < np; ++ i){
+      factor = 0.0;
+      for (j = 0; j < 3; ++ j){
+        factor += this.objectVectors[i][j] * rotation[2][j] / translation[2];
+      }
+      sopImagePoints[i].x = (1.0 + factor) * imagePoints[i].x;
+      sopImagePoints[i].y = (1.0 + factor) * imagePoints[i].y;
+    }
+
+    oldImageDifference = imageDifference;
+    imageDifference = 0.0;
+    
+    for (i = 0; i < np; ++ i){
+      imageDifference += Math.abs(sopImagePoints[i].x - oldSopImagePoints[i].x);
+      imageDifference += Math.abs(sopImagePoints[i].y - oldSopImagePoints[i].y);
+    }
+
+    delta = Math.abs(imageDifference - oldImageDifference);
+
+    converged = (0.0 === error.pixels) || (delta < 0.01);
+  }
+  
+  return error;
+};
+
+POS.Posit.prototype.error = function(imagePoints, rotation, translation){
+  var np = this.objectPoints.length,
+      move = [], projection = [], errorvec = [],
+      euclidean = 0.0, pixels = 0.0, maximum = 0.0,
+      i, j, k;
+
+  if ( !this.isValid(rotation, translation) ){
+    return {euclidean: -1.0, pixels: -1, maximum: -1.0};
+  }
+  
+  for (i = 0; i < np; ++ i){
+    move[i] = [];
+    for (j = 0; j < 3; ++ j){
+      move[i][j] = translation[j];
+    }
+  }
+  
+  for (i = 0; i < np; ++ i){
+    for (j = 0; j < 3; ++ j){
+      for (k = 0; k < 3; ++ k){
+        move[i][j] += rotation[j][k] * this.objectPoints[i][k];
+      }
+    }
+  }
+
+  for (i = 0; i < np; ++ i){
+    projection[i] = [];
+    for (j = 0; j < 2; ++ j){
+      projection[i][j] = this.focalLength * move[i][j] / move[i][2];
+    }
+  }
+  
+  for (i = 0; i < np; ++ i){
+    errorvec[i] = [projection[i][0] - imagePoints[i].x,
+                   projection[i][1] - imagePoints[i].y];
+  }
+
+  for (i = 0; i < np; ++ i){
+    euclidean += Math.sqrt(errorvec[i][0] * errorvec[i][0] +
+                           errorvec[i][1] * errorvec[i][1]);
+                       
+    pixels += Math.abs( Math.round(projection[i][0]) - Math.round(imagePoints[i].x) ) +
+              Math.abs( Math.round(projection[i][1]) - Math.round(imagePoints[i].y) );
+              
+    if (Math.abs(errorvec[i][0]) > maximum){
+      maximum = Math.abs(errorvec[i][0]);
+    }
+    if (Math.abs(errorvec[i][1]) > maximum){
+      maximum = Math.abs(errorvec[i][1]);
+    }
+  }
+
+  return {euclidean: euclidean / np, pixels: pixels, maximum: maximum};
+};
+
+POS.pseudoInverse = function(a, n, b){
+  var w = [], v = [[],[],[]], s = [[],[],[]],
+      wmax = 0.0, cn = 0,
+      i, j, k;
+
+  SVD.svdcmp(a, n, 3, w, v);
+
+  for (i = 0; i < 3; ++ i){
+    if (w[i] > wmax){
+      wmax = w[i];
+    }
+  }
+
+  wmax *= 0.01;
+
+  for (i = 0; i < 3; ++ i){
+    if (w[i] < wmax){
+      w[i] = 0.0;
+    }
+  }
+
+  for (j = 0; j < 3; ++ j){
+    if (0.0 === w[j]){
+      ++ cn;
+      for (k = j; k < 2; ++ k){
+        for (i = 0; i < n; ++ i){
+          a[i][k] = a[i][k + 1];
+        }
+        for (i = 0; i < 3; ++ i){
+          v[i][k] = v[i][k + 1];
+        }
+      }
+    }
+  }
+
+  for (j = 0; j < 2; ++ j){
+    if (0.0 === w[j]){
+      w[j] = w[j + 1];
+    }
+  }
+
+  for (i = 0; i < 3; ++ i){
+    for (j = 0; j < 3 - cn; ++ j){
+      s[i][j] = v[i][j] / w[j];
+    }
+  }
+  
+  for (i = 0; i < 3; ++ i){
+    for (j = 0; j < n; ++ j){
+      b[i][j] = 0.0;
+      for (k = 0; k < 3 - cn; ++ k){
+        b[i][j] += s[i][k] * a[j][k];
+      }
+    }
+  }
+};
+
+POS.Pose = function(error1, rotation1, translation1, error2, rotation2, translation2){
+  this.bestError = error1;
+  this.bestRotation = rotation1;
+  this.bestTranslation = translation1;
+  this.alternativeError = error2;
+  this.alternativeRotation = rotation2;
+  this.alternativeTranslation = translation2;
+};
+
 </script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
 <script>
 'use strict';
@@ -1620,12 +2125,24 @@ const overlay  = document.getElementById('overlay');
 const overCtx  = overlay.getContext('2d');
 const work     = document.getElementById('work');
 const workCtx  = work.getContext('2d', { willReadFrequently: true });
+const c3d      = document.getElementById('c3d');
 
-let detector;
-const STATE = { camOk:false, detectorOk:false, frameCount:0, fpsT:0, fpsLast:0 };
+let detector, posit;
+let renderer, scene, cam3, markerCube;
+let MARKER_SIZE_M = 0.05; // metres — settable from splash
+let SHOW_2D = true;
+
+const STATE = {
+  camOk:false, threeOk:false,
+  detectionsSeen: 0,
+  fpsT:0, frameCount:0, fpsLast:0,
+  lastMarker: null,
+};
 
 function setStatus(t) { document.getElementById('status').textContent = t; }
 
+// ─────────────────────────────────────
+// CAMERA
 // ─────────────────────────────────────
 async function startCamera() {
   try {
@@ -1636,132 +2153,229 @@ async function startCamera() {
     video.srcObject = stream;
     await video.play();
     STATE.camOk = true;
-    document.getElementById('i-res').textContent = `${video.videoWidth}×${video.videoHeight}`;
     return true;
-  } catch(e) {
-    setStatus('Camera non disponibile');
-    return false;
-  }
+  } catch(e) { setStatus('Camera non disponibile'); return false; }
 }
 
-function initDetector() {
-  if (typeof AR === 'undefined') {
-    setStatus('ERR: libreria ArUco non caricata');
-    return false;
-  }
-  try {
-    detector = new AR.Detector();
-    STATE.detectorOk = true;
-    return true;
-  } catch(e) {
-    setStatus('ERR detector: ' + e.message);
-    return false;
-  }
-}
-
-function resizeOverlay() {
-  overlay.width = window.innerWidth * (window.devicePixelRatio || 1);
-  overlay.height = window.innerHeight * (window.devicePixelRatio || 1);
-  overlay.style.width = window.innerWidth + 'px';
-  overlay.style.height = window.innerHeight + 'px';
-  overCtx.setTransform(window.devicePixelRatio||1, 0, 0, window.devicePixelRatio||1, 0, 0);
-}
-
-// Map a marker corner (in video pixel coords) to screen coords
-// The video is rendered with object-fit:cover, so we need to compute
-// the same scale and offset that the browser uses.
-function videoToScreen(px, py, vw, vh) {
+// ─────────────────────────────────────
+// VIDEO → SCREEN MAPPING (object-fit: cover)
+// ─────────────────────────────────────
+function getCoverTransform(vw, vh) {
   const sw = window.innerWidth, sh = window.innerHeight;
-  const vAspect = vw / vh;
-  const sAspect = sw / sh;
-  let scale, offX = 0, offY = 0;
-  if (vAspect > sAspect) {
-    // video wider than screen — crops left/right
-    scale = sh / vh;
-    offX = (sw - vw * scale) / 2;
-  } else {
-    // video taller than screen — crops top/bottom
-    scale = sw / vw;
-    offY = (sh - vh * scale) / 2;
-  }
-  return { x: px*scale + offX, y: py*scale + offY };
+  const vA = vw/vh, sA = sw/sh;
+  let scale, offX=0, offY=0;
+  if (vA > sA) { scale = sh/vh; offX = (sw - vw*scale)/2; }
+  else         { scale = sw/vw; offY = (sh - vh*scale)/2; }
+  return { scale, offX, offY, sw, sh, vw, vh };
 }
 
-function drawMarkers(markers, vw, vh) {
+function videoToScreen(px, py, T) {
+  return { x: px*T.scale + T.offX, y: py*T.scale + T.offY };
+}
+
+// ─────────────────────────────────────
+// 2D OVERLAY (marker outline)
+// ─────────────────────────────────────
+function resizeOverlay() {
+  const dpr = window.devicePixelRatio || 1;
+  overlay.width  = window.innerWidth  * dpr;
+  overlay.height = window.innerHeight * dpr;
+  overlay.style.width  = window.innerWidth  + 'px';
+  overlay.style.height = window.innerHeight + 'px';
+  overCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function draw2D(markers, T) {
   overCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
-  if (!markers || markers.length === 0) return;
-
+  if (!SHOW_2D || !markers || !markers.length) return;
   for (const m of markers) {
-    const pts = m.corners.map(c => videoToScreen(c.x, c.y, vw, vh));
-
-    // outline polygon
+    const pts = m.corners.map(c => videoToScreen(c.x, c.y, T));
     overCtx.beginPath();
     overCtx.moveTo(pts[0].x, pts[0].y);
-    for (let i=1; i<pts.length; i++) overCtx.lineTo(pts[i].x, pts[i].y);
+    for (let i=1; i<4; i++) overCtx.lineTo(pts[i].x, pts[i].y);
     overCtx.closePath();
     overCtx.strokeStyle = '#1a9e5c';
-    overCtx.lineWidth = 4;
+    overCtx.lineWidth = 3;
     overCtx.stroke();
-
-    // corner markers
-    overCtx.fillStyle = '#1a9e5c';
+    // numero corners (0 in rosso, gli altri verdi)
     pts.forEach((p, i) => {
-      overCtx.beginPath();
-      overCtx.arc(p.x, p.y, i === 0 ? 8 : 5, 0, Math.PI*2);
-      overCtx.fill();
+      overCtx.fillStyle = i === 0 ? '#e8410a' : '#1a9e5c';
+      overCtx.beginPath(); overCtx.arc(p.x, p.y, 6, 0, Math.PI*2); overCtx.fill();
     });
-
-    // ID label
-    const cx = (pts[0].x + pts[2].x) / 2;
-    const cy = (pts[0].y + pts[2].y) / 2;
-    overCtx.fillStyle = 'rgba(232,65,10,.85)';
-    overCtx.fillRect(cx - 30, cy - 22, 60, 44);
-    overCtx.fillStyle = '#fff';
-    overCtx.font = 'bold 28px Arial';
-    overCtx.textAlign = 'center';
-    overCtx.textBaseline = 'middle';
-    overCtx.fillText(m.id, cx, cy);
   }
 }
 
 // ─────────────────────────────────────
-// DETECTION LOOP
+// THREE.JS — camera at origin, world fixed
+// We move objects relative to camera based on POSIT
+// ─────────────────────────────────────
+function initThree() {
+  renderer = new THREE.WebGLRenderer({ canvas: c3d, alpha: true, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setClearColor(0, 0);
+
+  scene = new THREE.Scene();
+
+  // Camera placed at world origin, looking down -Z (standard Three.js)
+  // We'll match its FOV to the real camera's FOV.
+  cam3 = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.01, 100);
+  cam3.position.set(0, 0, 0);
+
+  // Lights
+  scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.5);
+  dir.position.set(2, 5, 3); scene.add(dir);
+
+  // Marker cube — sits in scene, will be repositioned each frame
+  // Cube edge = marker size, sitting on top of marker (centered above plane)
+  const s = MARKER_SIZE_M;
+  const cubeGeo = new THREE.BoxGeometry(s, s, s);
+  const cubeMat = new THREE.MeshPhongMaterial({ color: 0xe8410a, opacity: 0.7, transparent: true });
+  markerCube = new THREE.Mesh(cubeGeo, cubeMat);
+  // wireframe edges
+  const edges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(cubeGeo),
+    new THREE.LineBasicMaterial({ color: 0xffffff })
+  );
+  markerCube.add(edges);
+
+  // Axis triad on the cube (corner 0 at the front)
+  const ax = new THREE.AxesHelper(s * 1.2);
+  markerCube.add(ax);
+
+  markerCube.visible = false;
+  scene.add(markerCube);
+
+  STATE.threeOk = true;
+
+  window.addEventListener('resize', () => {
+    cam3.aspect = window.innerWidth / window.innerHeight;
+    cam3.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    resizeOverlay();
+  });
+}
+
+// Update Three.js camera FOV to match the real focal length used by POSIT.
+// fy_pixels = (image_height/2) / tan(vFov/2)  →  vFov = 2 * atan((H/2) / fy)
+function syncFOV(focalPixels, imgH) {
+  const vFov = 2 * Math.atan((imgH/2) / focalPixels) * 180 / Math.PI;
+  if (Math.abs(cam3.fov - vFov) > 0.5) {
+    cam3.fov = vFov;
+    cam3.updateProjectionMatrix();
+    document.getElementById('i-fov').textContent = vFov.toFixed(1) + '°';
+  }
+}
+
+// ─────────────────────────────────────
+// POSIT → Three.js transform
+// ─────────────────────────────────────
+// POSIT reference frame for the marker:
+//   X = right along marker
+//   Y = up along marker (image Y is inverted, so we flip below)
+//   Z = out of marker (toward camera)
+// Translation [tx, ty, tz] is the marker position in CAMERA space (in marker units = metres here).
+// In POSIT's camera convention, Z is FORWARD (positive toward scene).
+// In Three.js convention, camera looks down -Z.
+// So we negate Y and Z to convert POSIT camera → Three.js camera.
+function applyPose(pose) {
+  const R = pose.bestRotation;     // 3x3, rotation of marker in camera frame
+  const T = pose.bestTranslation;  // [tx, ty, tz]
+
+  // Marker position in Three.js camera space:
+  // POSIT: +X right, +Y up, +Z forward (into scene)
+  // Three: +X right, +Y up, -Z forward
+  // → flip Z (and Y, depending on how POSIT handles image Y inversion).
+  // The standard js-aruco demo flips Y and Z. Let's use the same convention.
+  const px =  T[0];
+  const py = -T[1];
+  const pz = -T[2];
+
+  // Rotation matrix → also needs Y/Z axis flips to convert to Three.js convention.
+  // Equivalent to: R_three = diag(1,-1,-1) · R_posit · diag(1,-1,-1)
+  const m = new THREE.Matrix4();
+  m.set(
+     R[0][0],  -R[0][1],  -R[0][2],  px,
+    -R[1][0],   R[1][1],   R[1][2],  py,
+    -R[2][0],   R[2][1],   R[2][2],  pz,
+     0,         0,         0,         1
+  );
+
+  markerCube.matrixAutoUpdate = false;
+  markerCube.matrix.copy(m);
+
+  // Lift the cube so it sits ABOVE the marker (its base on the marker plane)
+  // The marker is at origin of its own frame, plane Z=0.
+  // We want cube center at z_marker = +s/2 (above the plane).
+  // So pre-translate the cube geometry up. But since matrix is overridden,
+  // we add the offset directly into the position.
+  const liftLocal = new THREE.Vector3(0, 0, MARKER_SIZE_M/2);
+  liftLocal.applyMatrix4(m); // transform to camera space
+  markerCube.matrix.setPosition(liftLocal);
+
+  markerCube.visible = true;
+}
+
+// ─────────────────────────────────────
+// DETECTION + RENDER LOOP
 // ─────────────────────────────────────
 let lastDetect = 0;
-const INTERVAL = 100; // ms — 10fps target
+const DETECT_INTERVAL = 80; // ms
 
 function loop(now) {
   requestAnimationFrame(loop);
-  if (!STATE.camOk || !STATE.detectorOk) return;
-  if (now - lastDetect < INTERVAL) return;
-  lastDetect = now;
+  if (!STATE.camOk || !STATE.threeOk || !detector) return;
 
   const vw = video.videoWidth, vh = video.videoHeight;
   if (!vw) return;
-  work.width = vw; work.height = vh;
-  workCtx.drawImage(video, 0, 0);
 
-  let img;
-  try { img = workCtx.getImageData(0, 0, vw, vh); }
-  catch(e) { return; }
+  if (now - lastDetect >= DETECT_INTERVAL) {
+    lastDetect = now;
+    work.width = vw; work.height = vh;
+    workCtx.drawImage(video, 0, 0);
 
-  let markers;
-  try { markers = detector.detect(img); }
-  catch(e) { setStatus('ERR detect: ' + e.message); return; }
+    let img;
+    try { img = workCtx.getImageData(0, 0, vw, vh); } catch(e) { return; }
 
-  drawMarkers(markers, vw, vh);
+    let markers;
+    try { markers = detector.detect(img); } catch(e) { return; }
 
-  document.getElementById('i-n').textContent = markers.length;
-  if (markers.length > 0) {
-    const ids = markers.map(m=>m.id).join(', ');
-    document.getElementById('i-id').textContent = ids;
-    const big = document.getElementById('big-id');
-    big.textContent = markers[0].id;
-    big.classList.add('show');
-    clearTimeout(big._t);
-    big._t = setTimeout(()=> big.classList.remove('show'), 800);
-    setStatus(`Marker rilevati: ${markers.length}`);
+    const T = getCoverTransform(vw, vh);
+    draw2D(markers, T);
+
+    if (markers && markers.length > 0) {
+      const m = markers[0];
+      STATE.lastMarker = m;
+      document.getElementById('i-id').textContent = m.id;
+
+      // POSIT
+      // Focal length estimate for iPhone back camera: ~width * 0.85
+      const focalPx = vw * 0.85;
+      if (!posit) posit = new POS.Posit(MARKER_SIZE_M, focalPx);
+      // corners centered at image center, Y flipped to match POSIT convention
+      const corners = m.corners.map(c => ({ x: c.x - vw/2, y: vh/2 - c.y }));
+      let pose;
+      try { pose = posit.pose(corners); } catch(e) { return; }
+      if (pose) {
+        applyPose(pose);
+        syncFOV(focalPx, vh);
+        const T_ = pose.bestTranslation;
+        const dist = Math.sqrt(T_[0]*T_[0]+T_[1]*T_[1]+T_[2]*T_[2]);
+        document.getElementById('i-d').textContent = dist.toFixed(2) + ' m';
+        const p = markerCube.matrix.elements; // m41, m42, m43 in column-major
+        document.getElementById('i-p').textContent =
+          `${p[12].toFixed(2)},${p[13].toFixed(2)},${p[14].toFixed(2)}`;
+        setStatus(`Marker ${m.id} — ${dist.toFixed(2)}m`);
+        STATE.detectionsSeen++;
+      }
+    } else {
+      // Hide cube after a brief grace period (1 sec without detection)
+      if (now - lastDetect > 1000) markerCube.visible = false;
+    }
   }
+
+  renderer.render(scene, cam3);
 
   // FPS
   STATE.frameCount++;
@@ -1776,17 +2390,34 @@ function loop(now) {
 // BOOT
 // ─────────────────────────────────────
 document.getElementById('btn-start').addEventListener('click', async () => {
+  const sizeMm = parseFloat(document.getElementById('marker-size').value);
+  if (sizeMm > 0) MARKER_SIZE_M = sizeMm / 1000;
   document.getElementById('splash').style.display = 'none';
   resizeOverlay();
+
+  if (typeof AR === 'undefined' || typeof POS === 'undefined') {
+    setStatus('ERR: ArUco/POSIT non caricati');
+    return;
+  }
+  if (typeof THREE === 'undefined') {
+    setStatus('ERR: Three.js non caricato');
+    return;
+  }
+
+  detector = new AR.Detector();
+  initThree();
   const ok = await startCamera();
   if (!ok) return;
-  setStatus('Camera OK — init detector…');
-  if (!initDetector()) return;
-  setStatus('Detector pronto — punta un marker');
+  setStatus(`Pronto — marker ${(MARKER_SIZE_M*1000).toFixed(0)}mm — punta un marker`);
   requestAnimationFrame(loop);
 });
 
-window.addEventListener('resize', resizeOverlay);
+document.getElementById('tb-2d').addEventListener('click', () => {
+  SHOW_2D = !SHOW_2D;
+  document.getElementById('tb-2d').classList.toggle('on', SHOW_2D);
+  if (!SHOW_2D) overCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+});
+document.getElementById('tb-2d').classList.add('on');
 </script>
 </body>
 </html>
