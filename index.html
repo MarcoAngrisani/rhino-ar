@@ -3,220 +3,145 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Rhino AR</title>
+<title>Rhino AR v03</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+* { margin:0; padding:0; box-sizing:border-box; }
+:root {
+  --ink: #0a0a0f;
+  --paper: #f5f2eb;
+  --accent: #e8410a;
+  --ok: #1a9e5c;
+  --warn: #f0a500;
+  --glass: rgba(10,10,15,0.78);
+  --mono: 'Courier New', monospace;
+}
+body { background:var(--ink); color:var(--paper); font-family:var(--mono);
+       overflow:hidden; height:100dvh; width:100vw; }
 
-  :root {
-    --ink: #0a0a0f;
-    --paper: #f5f2eb;
-    --accent: #e8410a;
-    --ok: #1a9e5c;
-    --warn: #f0a500;
-    --glass: rgba(10,10,15,0.72);
-    --font-mono: 'Courier New', monospace;
-  }
+/* SPLASH */
+#splash {
+  position:fixed; inset:0; z-index:200;
+  background:var(--ink);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:1.8rem; padding:2rem; transition:opacity .4s;
+}
+#splash h1 { font-size:clamp(2.2rem,9vw,4rem); letter-spacing:-.03em;
+             text-transform:uppercase; line-height:.95; text-align:center; }
+#splash h1 span { color:var(--accent); }
+#splash p { font-size:.82rem; opacity:.55; text-align:center; max-width:290px; line-height:1.6; }
+.btn-primary {
+  background:var(--accent); color:var(--paper); border:none;
+  padding:.9rem 2.6rem; font-family:var(--mono); font-size:1rem;
+  letter-spacing:.1em; text-transform:uppercase; cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+}
+.btn-primary:active { opacity:.8; }
 
-  body {
-    background: var(--ink);
-    color: var(--paper);
-    font-family: var(--font-mono);
-    overflow: hidden;
-    height: 100dvh;
-    width: 100vw;
-  }
+/* PERMISSION MODAL */
+#perm-modal {
+  position:fixed; inset:0; z-index:300;
+  background:rgba(10,10,15,.94);
+  display:none; flex-direction:column; align-items:center; justify-content:center;
+  gap:1.4rem; padding:2rem; text-align:center;
+}
+#perm-modal.show { display:flex; }
+#perm-modal .ico { font-size:2.8rem; }
+#perm-modal h2 { font-size:1.1rem; text-transform:uppercase; letter-spacing:.06em; }
+#perm-modal p { font-size:.78rem; opacity:.55; max-width:270px; line-height:1.6; }
+#perm-modal .row { display:flex; gap:.8rem; }
+.btn-secondary {
+  background:transparent; color:var(--paper);
+  border:1px solid rgba(245,242,235,.25);
+  padding:.75rem 1.6rem; font-family:var(--mono); font-size:.85rem;
+  letter-spacing:.07em; text-transform:uppercase; cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+}
 
-  /* ── SPLASH ── */
-  #splash {
-    position: fixed; inset: 0; z-index: 100;
-    background: var(--ink);
-    display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    gap: 2rem; padding: 2rem;
-    transition: opacity .5s;
-  }
-  #splash h1 {
-    font-size: clamp(2rem, 8vw, 3.5rem);
-    letter-spacing: -.03em;
-    text-transform: uppercase;
-    line-height: 1;
-  }
-  #splash h1 span { color: var(--accent); }
-  #splash p { font-size: .85rem; opacity: .6; text-align: center; max-width: 300px; }
-  #splash button {
-    background: var(--accent);
-    color: var(--paper);
-    border: none;
-    padding: .9rem 2.4rem;
-    font-family: var(--font-mono);
-    font-size: 1rem;
-    letter-spacing: .08em;
-    text-transform: uppercase;
-    cursor: pointer;
-    transition: transform .15s, background .15s;
-  }
-  #splash button:active { transform: scale(.96); }
+/* VIDEO + CANVAS */
+#cam { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; }
+#c3d { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; }
 
-  /* ── CAMERA ── */
-  #cam { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-  #canvas3d { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+/* STATUS BAR */
+#status {
+  position:fixed; top:1rem; left:1rem; right:1rem;
+  display:flex; align-items:center; gap:.6rem;
+  background:var(--glass); backdrop-filter:blur(10px);
+  padding:.5rem .9rem; border-left:3px solid var(--accent);
+  font-size:.7rem; letter-spacing:.07em; text-transform:uppercase;
+  pointer-events:none; z-index:10;
+}
+#sdot { width:7px; height:7px; border-radius:50%; background:var(--warn); flex-shrink:0; transition:background .3s; }
+#sdot.ok { background:var(--ok); }
+#sdot.hot { background:var(--accent); animation:blink .5s infinite alternate; }
+@keyframes blink { to { opacity:.15; } }
 
-  /* ── HUD ── */
-  #hud {
-    position: fixed; inset: 0; pointer-events: none;
-    display: flex; flex-direction: column; justify-content: space-between;
-    padding: 1rem;
-  }
+/* TOOLBAR */
+#toolbar {
+  position:fixed; bottom:1.2rem; left:0; right:0;
+  display:flex; gap:.5rem; justify-content:center; z-index:10;
+}
+.tb { background:var(--glass); backdrop-filter:blur(10px);
+      border:1px solid rgba(245,242,235,.12); color:var(--paper);
+      font-family:var(--mono); font-size:.68rem; letter-spacing:.07em;
+      text-transform:uppercase; padding:.65rem 1.1rem; cursor:pointer;
+      -webkit-tap-highlight-color:transparent; transition:border-color .2s; }
+.tb.on { border-color:var(--accent); color:var(--accent); }
+.tb:active { background:rgba(232,65,10,.2); }
 
-  #status-bar {
-    pointer-events: none;
-    display: flex; align-items: center; gap: .6rem;
-    background: var(--glass);
-    backdrop-filter: blur(8px);
-    padding: .5rem .9rem;
-    border-left: 3px solid var(--accent);
-    font-size: .72rem;
-    letter-spacing: .06em;
-    text-transform: uppercase;
-    max-width: max-content;
-  }
-  #status-dot {
-    width: 7px; height: 7px; border-radius: 50%;
-    background: var(--warn);
-    transition: background .3s;
-    flex-shrink: 0;
-  }
-  #status-dot.ok { background: var(--ok); }
-  #status-dot.scan { background: var(--accent); animation: pulse .6s infinite alternate; }
-  @keyframes pulse { to { opacity: .2; } }
+/* INFO CARD */
+#card {
+  position:fixed; bottom:5.5rem; left:50%; transform:translateX(-50%) translateY(14px);
+  background:var(--glass); backdrop-filter:blur(12px);
+  border-left:3px solid var(--ok); padding:.8rem 1.2rem; min-width:210px;
+  opacity:0; pointer-events:none; transition:opacity .25s, transform .25s; z-index:10;
+}
+#card.show { opacity:1; transform:translateX(-50%) translateY(0); }
+#card .cid { font-size:.6rem; opacity:.45; letter-spacing:.1em; text-transform:uppercase; }
+#card .ctype { font-size:1rem; font-weight:bold; margin:.15rem 0; }
+#card .cpos { font-size:.68rem; opacity:.55; }
+#card .cdist { font-size:.68rem; color:var(--ok); margin-top:.2rem; }
 
-  /* QR crosshair */
-  #crosshair {
-    position: fixed;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    width: 180px; height: 180px;
-    pointer-events: none;
-    opacity: .5;
-  }
-  #crosshair::before, #crosshair::after {
-    content: '';
-    position: absolute;
-    background: var(--paper);
-  }
-  .ch-corner {
-    position: absolute;
-    width: 24px; height: 24px;
-    border-color: var(--paper);
-    border-style: solid;
-    opacity: .7;
-  }
-  .ch-corner.tl { top: 0; left: 0; border-width: 2px 0 0 2px; }
-  .ch-corner.tr { top: 0; right: 0; border-width: 2px 2px 0 0; }
-  .ch-corner.bl { bottom: 0; left: 0; border-width: 0 0 2px 2px; }
-  .ch-corner.br { bottom: 0; right: 0; border-width: 0 2px 2px 0; }
+/* ELEMENT LIST */
+#elist {
+  position:fixed; top:3.5rem; right:0; width:min(270px,78vw);
+  background:var(--glass); backdrop-filter:blur(12px);
+  border-left:1px solid rgba(245,242,235,.08);
+  max-height:65vh; overflow-y:auto;
+  transform:translateX(102%); transition:transform .3s; z-index:10;
+}
+#elist.open { transform:translateX(0); }
+#elist h3 { font-size:.66rem; letter-spacing:.1em; text-transform:uppercase;
+            padding:.75rem 1rem; border-bottom:1px solid rgba(245,242,235,.08);
+            color:var(--accent); }
+.erow { display:flex; align-items:center; gap:.55rem; padding:.5rem 1rem;
+        border-bottom:1px solid rgba(245,242,235,.05); font-size:.7rem; }
+.erow .edot { width:7px; height:7px; border-radius:50%;
+              background:rgba(245,242,235,.15); flex-shrink:0; transition:background .3s; }
+.erow.seen .edot { background:var(--ok); }
+.erow .ename { flex:1; opacity:.8; }
+.erow .etag { font-size:.58rem; opacity:.35; text-transform:uppercase; }
 
-  /* bottom toolbar */
-  #toolbar {
-    pointer-events: all;
-    display: flex; gap: .6rem; justify-content: center;
-  }
-  .tb-btn {
-    background: var(--glass);
-    backdrop-filter: blur(8px);
-    border: 1px solid rgba(245,242,235,.15);
-    color: var(--paper);
-    font-family: var(--font-mono);
-    font-size: .72rem;
-    letter-spacing: .06em;
-    text-transform: uppercase;
-    padding: .7rem 1.2rem;
-    cursor: pointer;
-    transition: border-color .2s, background .2s;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .tb-btn:active { background: rgba(232,65,10,.25); border-color: var(--accent); }
-  .tb-btn.active { border-color: var(--accent); color: var(--accent); }
+/* ARUCO RETICLE */
+#reticle {
+  position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+  width:160px; height:160px; pointer-events:none; z-index:5;
+}
+.rc { position:absolute; width:22px; height:22px; border-color:rgba(245,242,235,.6); border-style:solid; }
+.rc.tl { top:0; left:0; border-width:2px 0 0 2px; }
+.rc.tr { top:0; right:0; border-width:2px 2px 0 0; }
+.rc.bl { bottom:0; left:0; border-width:0 0 2px 2px; }
+.rc.br { bottom:0; right:0; border-width:0 2px 2px 0; }
 
-  /* element info card */
-  #info-card {
-    position: fixed;
-    bottom: 5rem; left: 50%;
-    transform: translateX(-50%) translateY(20px);
-    background: var(--glass);
-    backdrop-filter: blur(12px);
-    border-left: 3px solid var(--ok);
-    padding: .8rem 1.2rem;
-    min-width: 220px;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity .3s, transform .3s;
-  }
-  #info-card.show {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-  }
-  #info-card .el-id { font-size: .65rem; opacity: .5; letter-spacing: .1em; text-transform: uppercase; }
-  #info-card .el-type { font-size: 1.1rem; font-weight: bold; margin: .1rem 0; }
-  #info-card .el-coords { font-size: .7rem; opacity: .6; }
+/* DEBUG */
+#dbg { position:fixed; top:3.8rem; left:1rem; background:var(--glass);
+       backdrop-filter:blur(8px); padding:.5rem .8rem; font-size:.6rem;
+       line-height:1.7; display:none; z-index:10; }
+#dbg.show { display:block; }
 
-  /* element list */
-  #el-list {
-    position: fixed;
-    top: 4rem; right: 0;
-    width: min(280px, 80vw);
-    background: var(--glass);
-    backdrop-filter: blur(12px);
-    border-left: 1px solid rgba(245,242,235,.1);
-    max-height: 60vh;
-    overflow-y: auto;
-    transform: translateX(100%);
-    transition: transform .3s;
-    pointer-events: all;
-  }
-  #el-list.open { transform: translateX(0); }
-  #el-list h3 {
-    font-size: .7rem; letter-spacing: .1em; text-transform: uppercase;
-    padding: .8rem 1rem; border-bottom: 1px solid rgba(245,242,235,.1);
-    color: var(--accent);
-  }
-  .el-row {
-    display: flex; align-items: center; gap: .6rem;
-    padding: .55rem 1rem;
-    border-bottom: 1px solid rgba(245,242,235,.06);
-    font-size: .72rem;
-  }
-  .el-row .dot {
-    width: 8px; height: 8px; border-radius: 50%;
-    background: rgba(245,242,235,.2); flex-shrink: 0;
-    transition: background .3s;
-  }
-  .el-row.scanned .dot { background: var(--ok); }
-  .el-row .name { opacity: .8; flex: 1; }
-  .el-row .type-tag {
-    font-size: .6rem; opacity: .4; text-transform: uppercase; letter-spacing: .05em;
-  }
-
-  /* flash overlay */
-  #flash {
-    position: fixed; inset: 0;
-    background: var(--ok);
-    opacity: 0; pointer-events: none;
-    transition: opacity .1s;
-  }
-  #flash.go { opacity: .25; }
-
-  /* debug panel */
-  #debug {
-    position: fixed; top: 4rem; left: 1rem;
-    background: var(--glass);
-    backdrop-filter: blur(8px);
-    padding: .6rem .8rem;
-    font-size: .62rem; opacity: .7;
-    line-height: 1.6;
-    display: none;
-  }
-  #debug.show { display: block; }
+/* FLASH */
+#flash { position:fixed; inset:0; background:var(--ok);
+         opacity:0; pointer-events:none; transition:opacity .08s; z-index:5; }
+#flash.go { opacity:.22; }
 </style>
 </head>
 <body>
@@ -224,503 +149,493 @@
 <!-- SPLASH -->
 <div id="splash">
   <h1>RHINO<br><span>AR</span></h1>
-  <p>Inquadra i QR code in cantiere per ancorare il modello nello spazio</p>
-  <button id="start-btn">AVVIA CAMERA</button>
+  <p>Tracking posizione da marker ArUco — modello Rhino in overlay real-time</p>
+  <button class="btn-primary" id="btn-start">AVVIA</button>
 </div>
 
-<!-- CAMERA + 3D -->
+<!-- PERMISSION MODAL -->
+<div id="perm-modal">
+  <div class="ico">📡</div>
+  <h2>Giroscopio</h2>
+  <p>Safari su iPhone richiede autorizzazione esplicita per i sensori di movimento. Necessario per ruotare il modello col telefono.</p>
+  <div class="row">
+    <button class="btn-primary" id="btn-gyro-ok">AUTORIZZA</button>
+    <button class="btn-secondary" id="btn-gyro-skip">SALTA</button>
+  </div>
+</div>
+
+<!-- VIDEO + 3D -->
 <video id="cam" autoplay playsinline muted></video>
-<canvas id="canvas3d"></canvas>
-<canvas id="qr-canvas" style="display:none"></canvas>
+<canvas id="c3d"></canvas>
+<canvas id="qc" style="display:none"></canvas>
 
 <!-- HUD -->
-<div id="hud">
-  <div id="status-bar">
-    <div id="status-dot"></div>
-    <span id="status-text">In attesa di permessi</span>
-  </div>
+<div id="status"><div id="sdot"></div><span id="stxt">In attesa…</span></div>
 
-  <div id="toolbar">
-    <button class="tb-btn" id="btn-list">ELEMENTI</button>
-    <button class="tb-btn" id="btn-scan">SCAN QR</button>
-    <button class="tb-btn" id="btn-reset">RESET</button>
-    <button class="tb-btn" id="btn-debug">DBG</button>
-  </div>
+<div id="reticle">
+  <div class="rc tl"></div><div class="rc tr"></div>
+  <div class="rc bl"></div><div class="rc br"></div>
 </div>
 
-<!-- QR crosshair -->
-<div id="crosshair">
-  <div class="ch-corner tl"></div>
-  <div class="ch-corner tr"></div>
-  <div class="ch-corner bl"></div>
-  <div class="ch-corner br"></div>
+<div id="card">
+  <div class="cid" id="c-id"></div>
+  <div class="ctype" id="c-type"></div>
+  <div class="cpos" id="c-pos"></div>
+  <div class="cdist" id="c-dist"></div>
 </div>
 
-<!-- Info card -->
-<div id="info-card">
-  <div class="el-id" id="ic-id">—</div>
-  <div class="el-type" id="ic-type">—</div>
-  <div class="el-coords" id="ic-coords">—</div>
+<div id="elist">
+  <h3>Elementi</h3>
+  <div id="elist-body"></div>
 </div>
 
-<!-- Element list -->
-<div id="el-list">
-  <h3>Elementi modello</h3>
-  <div id="el-list-body"></div>
+<div id="dbg">
+  <div id="d-imu">IMU: —</div>
+  <div id="d-pos">POS: —</div>
+  <div id="d-mrk">MRK: —</div>
+  <div id="d-fps">FPS: —</div>
 </div>
 
-<!-- Flash -->
+<div id="toolbar">
+  <button class="tb" id="tb-list">ELEMENTI</button>
+  <button class="tb" id="tb-gyro">GIROSCOPIO</button>
+  <button class="tb" id="tb-reset">RESET</button>
+  <button class="tb" id="tb-dbg">DBG</button>
+</div>
+
 <div id="flash"></div>
 
-<!-- Debug -->
-<div id="debug" id="debug-panel">
-  <div id="dbg-pos">pos: —</div>
-  <div id="dbg-rot">rot: —</div>
-  <div id="dbg-anchor">anchor: —</div>
-  <div id="dbg-qr">qr: —</div>
-</div>
-
-<!-- three.js CDN -->
+<!-- LIBS -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<!-- jsQR -->
-<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/js-aruco2@0.0.5/src/aruco.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/js-aruco2@0.0.5/src/posit1.js"></script>
 
 <script>
-// ═══════════════════════════════════════════════
-//  MODEL DATA — JSON di test (sostituibile con export Rhino)
-// ═══════════════════════════════════════════════
+'use strict';
+
+// ═══════════════════════════════════
+// MODEL — sostituire con export Rhino
+// Coordinate in metri. X=destra, Y=avanti, Z=alto
+// ═══════════════════════════════════
 const MODEL = {
-  name: "Edificio Test",
-  unit: "m",
-  origin: { x: 0, y: 0, z: 0 },
+  markerSize: 0.15, // dimensione fisica marker ArUco in metri (15cm)
   elements: [
-    // Pilastri (x, y = pianta; z = base; h = altezza)
-    { id: "PIL-A1", type: "column", x: 0,   y: 0,   z: 0, h: 3.2, r: 0.2 },
-    { id: "PIL-A2", type: "column", x: 5,   y: 0,   z: 0, h: 3.2, r: 0.2 },
-    { id: "PIL-B1", type: "column", x: 0,   y: 4,   z: 0, h: 3.2, r: 0.2 },
-    { id: "PIL-B2", type: "column", x: 5,   y: 4,   z: 0, h: 3.2, r: 0.2 },
-    // Travi
-    { id: "TRV-1",  type: "beam",   x1: 0, y1: 0, x2: 5, y2: 0, z: 3.2, w: 0.3, h: 0.5 },
-    { id: "TRV-2",  type: "beam",   x1: 0, y1: 4, x2: 5, y2: 4, z: 3.2, w: 0.3, h: 0.5 },
-    { id: "TRV-3",  type: "beam",   x1: 0, y1: 0, x2: 0, y2: 4, z: 3.2, w: 0.3, h: 0.5 },
-    // Parete
-    { id: "PAR-1",  type: "wall",   x1: 5, y1: 0, x2: 5, y2: 4, z: 0, h: 3.2, t: 0.2 },
+    // PILASTRI: { id, arucoId, type, x,y,z, h, r }
+    // arucoId = ID del marker ArUco fisicamente attaccato all'elemento
+    { id:'PIL-A1', arucoId:0,  type:'column', x:0, y:0, z:0, h:3.2, r:0.15 },
+    { id:'PIL-A2', arucoId:1,  type:'column', x:5, y:0, z:0, h:3.2, r:0.15 },
+    { id:'PIL-B1', arucoId:2,  type:'column', x:0, y:4, z:0, h:3.2, r:0.15 },
+    { id:'PIL-B2', arucoId:3,  type:'column', x:5, y:4, z:0, h:3.2, r:0.15 },
+    // TRAVI: { id, arucoId, type, x1,y1,x2,y2, z, w, h }
+    { id:'TRV-1',  arucoId:4,  type:'beam', x1:0,y1:0, x2:5,y2:0, z:3.2, w:0.25, h:0.45 },
+    { id:'TRV-2',  arucoId:5,  type:'beam', x1:0,y1:4, x2:5,y2:4, z:3.2, w:0.25, h:0.45 },
+    { id:'TRV-3',  arucoId:6,  type:'beam', x1:0,y1:0, x2:0,y2:4, z:3.2, w:0.25, h:0.45 },
+    // PARETE: { id, arucoId, type, x1,y1,x2,y2, z, h, t }
+    { id:'PAR-1',  arucoId:7,  type:'wall', x1:5,y1:0, x2:5,y2:4, z:0, h:3.2, t:0.2 },
   ]
 };
 
-// QR anchor points — ogni QR conosce la sua posizione nel modello
-// (in produzione questi dati sono embedded nel QR stesso)
-const QR_ANCHORS = {
-  "RHINO_AR:PIL-A1:0,0,0":  { id: "PIL-A1", wx: 0, wy: 0, wz: 0 },
-  "RHINO_AR:PIL-A2:5,0,0":  { id: "PIL-A2", wx: 5, wy: 0, wz: 0 },
-  "RHINO_AR:PIL-B1:0,4,0":  { id: "PIL-B1", wx: 0, wy: 4, wz: 0 },
-  "RHINO_AR:PIL-B2:5,4,0":  { id: "PIL-B2", wx: 5, wy: 4, wz: 0 },
-  // Fallback per test rapido: qualsiasi testo con coordinate
-  "TEST_QR_A1": { id: "PIL-A1", wx: 0, wy: 0, wz: 0 },
-  "TEST_QR_A2": { id: "PIL-A2", wx: 5, wy: 0, wz: 0 },
-};
+// Lookup: arucoId → element
+const ARUCO_MAP = {};
+MODEL.elements.forEach(el => { ARUCO_MAP[el.arucoId] = el; });
 
-// ═══════════════════════════════════════════════
-//  STATE
-// ═══════════════════════════════════════════════
-const state = {
+// ═══════════════════════════════════
+// STATE
+// ═══════════════════════════════════
+const S = {
   camReady: false,
-  oriented: false,
-  // camera world position (metres, model space)
-  pos: { x: 0, y: -2, z: 1.7 }, // default: 2m dal punto zero, altezza occhi
-  // camera orientation from IMU
-  alpha: 0, beta: 0, gamma: 0,
-  // anchor: last QR scan
+  imuReady: false,
+  // Camera world position (model metres, Rhino coords)
+  wx: 0, wy: -2, wz: 1.7,
+  // IMU angles
+  alpha:0, beta:0, gamma:0,
+  // Last anchor
   anchor: null,
-  scannedIds: new Set(),
-  scanning: false,
-  debugMode: false,
+  seen: new Set(),
+  dbg: false,
   listOpen: false,
+  lastFps: 0, frames: 0, fpsT: 0,
 };
 
-// ═══════════════════════════════════════════════
-//  THREE.JS SETUP
-// ═══════════════════════════════════════════════
-let renderer, scene, camera3d, modelGroup;
+// ═══════════════════════════════════
+// THREE.JS
+// ═══════════════════════════════════
+let renderer, scene, cam3, modelGroup;
+const meshMap = {};
+
+const MATS = {
+  column: () => new THREE.MeshPhongMaterial({ color:0x4a9eff, opacity:.5, transparent:true }),
+  beam:   () => new THREE.MeshPhongMaterial({ color:0xff8c2e, opacity:.5, transparent:true }),
+  wall:   () => new THREE.MeshPhongMaterial({ color:0xf5f2eb, opacity:.18, transparent:true }),
+  column_ok: () => new THREE.MeshPhongMaterial({ color:0x1a9e5c, opacity:.7, transparent:true }),
+  beam_ok:   () => new THREE.MeshPhongMaterial({ color:0x1a9e5c, opacity:.7, transparent:true }),
+  wall_ok:   () => new THREE.MeshPhongMaterial({ color:0x1a9e5c, opacity:.35, transparent:true }),
+};
+const EDGE_COLORS = { column:0x4a9eff, beam:0xff8c2e, wall:0xf5f2eb };
 
 function initThree() {
-  const canvas = document.getElementById('canvas3d');
-  renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
-  renderer.setPixelRatio(window.devicePixelRatio);
+  const canvas = document.getElementById('c3d');
+  renderer = new THREE.WebGLRenderer({ canvas, alpha:true, antialias:true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setClearColor(0x000000, 0);
+  renderer.setClearColor(0,0);
 
   scene = new THREE.Scene();
+  cam3 = new THREE.PerspectiveCamera(62, window.innerWidth/window.innerHeight, 0.02, 300);
 
-  // FOV approssimato per iPhone — calibrabile
-  camera3d = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.05, 200);
-  camera3d.position.set(0, 0, 0);
+  scene.add(new THREE.AmbientLight(0xffffff, .9));
+  const dl = new THREE.DirectionalLight(0xffffff, .5);
+  dl.position.set(4,8,4); scene.add(dl);
 
-  // Lights
-  scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-  const dir = new THREE.DirectionalLight(0xffffff, 0.6);
-  dir.position.set(5, 10, 5);
-  scene.add(dir);
-
-  // Model group
   modelGroup = new THREE.Group();
   scene.add(modelGroup);
 
   buildModel();
-  window.addEventListener('resize', onResize);
+  window.addEventListener('resize', () => {
+    cam3.aspect = window.innerWidth/window.innerHeight;
+    cam3.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
 }
 
-// Colors per tipo
-const MAT = {
-  column: new THREE.MeshPhongMaterial({ color: 0x4a9eff, opacity: 0.55, transparent: true, wireframe: false }),
-  beam:   new THREE.MeshPhongMaterial({ color: 0xff9a2e, opacity: 0.55, transparent: true }),
-  wall:   new THREE.MeshPhongMaterial({ color: 0xf5f2eb, opacity: 0.20, transparent: true }),
-  column_scanned: new THREE.MeshPhongMaterial({ color: 0x1a9e5c, opacity: 0.75, transparent: true }),
-  beam_scanned:   new THREE.MeshPhongMaterial({ color: 0x1a9e5c, opacity: 0.75, transparent: true }),
-  wall_scanned:   new THREE.MeshPhongMaterial({ color: 0x1a9e5c, opacity: 0.40, transparent: true }),
-};
-
-const meshMap = {}; // id → mesh
-
 function buildModel() {
-  modelGroup.clear();
+  // Clear
+  while (modelGroup.children.length) modelGroup.remove(modelGroup.children[0]);
+  Object.keys(meshMap).forEach(k => delete meshMap[k]);
 
   MODEL.elements.forEach(el => {
-    let mesh;
+    let geo, mesh;
+    const mat = MATS[el.type]();
 
     if (el.type === 'column') {
-      const geo = new THREE.CylinderGeometry(el.r, el.r, el.h, 12);
-      mesh = new THREE.Mesh(geo, MAT.column.clone());
-      mesh.position.set(el.x, el.z + el.h / 2, -el.y); // Three.js: Y=up, Z=into screen; Rhino: Z=up, Y=forward
-      // wireframe edge
-      const edges = new THREE.EdgesGeometry(geo);
-      const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x4a9eff, opacity: 0.8, transparent: true }));
-      mesh.add(line);
+      geo = new THREE.CylinderGeometry(el.r, el.r, el.h, 10);
+      mesh = new THREE.Mesh(geo, mat);
+      // Rhino→Three: X=X, Y(up)=Z(rhino), Z(three)= -Y(rhino)
+      mesh.position.set(el.x, el.z + el.h/2, -el.y);
 
     } else if (el.type === 'beam') {
-      const dx = el.x2 - el.x1, dy = el.y2 - el.y1;
-      const len = Math.sqrt(dx * dx + dy * dy);
-      const geo = new THREE.BoxGeometry(len, el.h, el.w);
-      mesh = new THREE.Mesh(geo, MAT.beam.clone());
-      const cx = (el.x1 + el.x2) / 2;
-      const cy = (el.y1 + el.y2) / 2;
-      mesh.position.set(cx, el.z + el.h / 2, -cy);
-      mesh.rotation.y = Math.atan2(dy, dx); // align along beam direction
-      const edges = new THREE.EdgesGeometry(geo);
-      const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xff9a2e, opacity: 0.8, transparent: true }));
-      mesh.add(line);
+      const dx=el.x2-el.x1, dy=el.y2-el.y1;
+      const len = Math.sqrt(dx*dx+dy*dy);
+      geo = new THREE.BoxGeometry(len, el.h, el.w);
+      mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set((el.x1+el.x2)/2, el.z+el.h/2, -(el.y1+el.y2)/2);
+      mesh.rotation.y = Math.atan2(dy, dx);
 
     } else if (el.type === 'wall') {
-      const dx = el.x2 - el.x1, dy = el.y2 - el.y1;
-      const len = Math.sqrt(dx * dx + dy * dy);
-      const geo = new THREE.BoxGeometry(len, el.h, el.t);
-      mesh = new THREE.Mesh(geo, MAT.wall.clone());
-      const cx = (el.x1 + el.x2) / 2;
-      const cy = (el.y1 + el.y2) / 2;
-      mesh.position.set(cx, el.z + el.h / 2, -cy);
+      const dx=el.x2-el.x1, dy=el.y2-el.y1;
+      const len = Math.sqrt(dx*dx+dy*dy);
+      geo = new THREE.BoxGeometry(len, el.h, el.t);
+      mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set((el.x1+el.x2)/2, el.z+el.h/2, -(el.y1+el.y2)/2);
       mesh.rotation.y = Math.atan2(dy, dx);
-      const edges = new THREE.EdgesGeometry(geo);
-      const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xf5f2eb, opacity: 0.5, transparent: true }));
-      mesh.add(line);
     }
 
     if (mesh) {
-      mesh.userData.elId = el.id;
-      mesh.userData.type = el.type;
+      const edges = new THREE.LineSegments(
+        new THREE.EdgesGeometry(geo),
+        new THREE.LineBasicMaterial({ color: EDGE_COLORS[el.type], opacity:.9, transparent:true })
+      );
+      mesh.add(edges);
+      mesh.userData = { id:el.id, type:el.type };
       modelGroup.add(mesh);
       meshMap[el.id] = mesh;
     }
   });
 
-  // Reference grid (floor)
-  const gridHelper = new THREE.GridHelper(20, 20, 0x333333, 0x222222);
-  gridHelper.position.y = 0;
-  modelGroup.add(gridHelper);
+  // Floor grid
+  const grid = new THREE.GridHelper(24, 24, 0x222228, 0x18181e);
+  modelGroup.add(grid);
 }
 
-function markScanned(id) {
-  state.scannedIds.add(id);
-  const mesh = meshMap[id];
-  if (!mesh) return;
-  const t = mesh.userData.type;
-  const mat = MAT[t + '_scanned'];
-  if (mat) mesh.material = mat.clone();
+function markSeen(id) {
+  S.seen.add(id);
+  const m = meshMap[id];
+  if (!m) return;
+  m.material = MATS[m.userData.type + '_ok']();
 }
 
-function onResize() {
-  if (!renderer) return;
-  camera3d.aspect = window.innerWidth / window.innerHeight;
-  camera3d.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-}
-
-// ═══════════════════════════════════════════════
-//  IMU ORIENTATION
-// ═══════════════════════════════════════════════
-let imuGranted = false;
-
-function initIMU() {
-  const handler = (e) => {
-    if (e.alpha === null) return;
-    state.alpha = e.alpha;
-    state.beta  = e.beta;
-    state.gamma = e.gamma;
-    state.oriented = true;
-    setStatus('ok', 'In tracking');
-  };
-
-  if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-    // iOS 13+
-    DeviceOrientationEvent.requestPermission().then(r => {
-      if (r === 'granted') { window.addEventListener('deviceorientation', handler, true); imuGranted = true; }
-    }).catch(() => setStatus('warn', 'Giroscopio non disponibile'));
-  } else {
-    window.addEventListener('deviceorientation', handler, true);
-    imuGranted = true;
+// ═══════════════════════════════════
+// IMU
+// ═══════════════════════════════════
+function onOrientation(e) {
+  if (e.alpha === null) return;
+  S.alpha = e.alpha || 0;
+  S.beta  = e.beta  || 0;
+  S.gamma = e.gamma || 0;
+  if (!S.imuReady) {
+    S.imuReady = true;
+    setStatus('ok', 'Giroscopio attivo — cerca marker');
+    document.getElementById('tb-gyro').classList.add('on');
   }
 }
 
-// Convert IMU Euler to Three.js camera quaternion
-// Coordinate system: Rhino X→right, Y→forward, Z→up
-//                    Three X→right, Y→up, Z→toward viewer
-function imuToQuaternion(alpha, beta, gamma) {
-  // alpha: compass heading (yaw around Z)
-  // beta:  tilt forward/back (pitch around X)
-  // gamma: tilt left/right (roll around Y)
-  const a = THREE.MathUtils.degToRad(alpha);
-  const b = THREE.MathUtils.degToRad(beta);
-  const g = THREE.MathUtils.degToRad(gamma);
-
-  const ea = new THREE.Euler(b, -a, -g, 'YXZ');
-  return new THREE.Quaternion().setFromEuler(ea);
+async function requestGyro() {
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    try {
+      const res = await DeviceOrientationEvent.requestPermission();
+      if (res === 'granted') {
+        window.addEventListener('deviceorientation', onOrientation, true);
+        return true;
+      }
+      setStatus('warn', 'Giroscopio negato');
+      return false;
+    } catch(e) { return false; }
+  } else {
+    window.addEventListener('deviceorientation', onOrientation, true);
+    return true;
+  }
 }
 
-// ═══════════════════════════════════════════════
-//  CAMERA STREAM
-// ═══════════════════════════════════════════════
-const video = document.getElementById('cam');
-const qrCanvas = document.getElementById('qr-canvas');
-const qrCtx = qrCanvas.getContext('2d', { willReadFrequently: true });
+// IMU → Three.js quaternion
+// iPhone held portrait, camera pointing out back
+function imuQuat() {
+  const a = THREE.MathUtils.degToRad(S.alpha);
+  const b = THREE.MathUtils.degToRad(S.beta);
+  const g = THREE.MathUtils.degToRad(S.gamma);
+  const e = new THREE.Euler(b, -a, -g, 'YXZ');
+  return new THREE.Quaternion().setFromEuler(e);
+}
 
+// ═══════════════════════════════════
+// ARUCO DETECTION
+// ═══════════════════════════════════
+const video = document.getElementById('cam');
+const qc    = document.getElementById('qc');
+const qctx  = qc.getContext('2d', { willReadFrequently:true });
+let detector, posit;
+let lastDetect = 0;
+const DETECT_INTERVAL = 300; // ms
+
+function initAruco() {
+  try {
+    detector = new AR.Detector();
+  } catch(e) {
+    console.error('ArUco init failed:', e);
+    setStatus('warn', 'ArUco non disponibile');
+  }
+}
+
+function detectAruco(now) {
+  if (!detector) return;
+  if (!S.camReady) return;
+  if (now - lastDetect < DETECT_INTERVAL) return;
+  lastDetect = now;
+
+  const W = video.videoWidth, H = video.videoHeight;
+  if (!W) return;
+  qc.width = W; qc.height = H;
+  qctx.drawImage(video, 0, 0);
+  const img = qctx.getImageData(0, 0, W, H);
+
+  let markers;
+  try { markers = detector.detect(img); } catch(e) { return; }
+  if (!markers || markers.length === 0) return;
+
+  // Use first recognised marker that's in our model
+  for (const m of markers) {
+    const el = ARUCO_MAP[m.id];
+    if (!el) continue;
+
+    // POSIT: estimate camera pose from marker
+    // focal length approximation for iPhone: ~0.8 * imageWidth
+    if (!posit || posit._modelSize !== MODEL.markerSize) {
+      const focalLen = W * 0.8;
+      posit = new POS.Posit(MODEL.markerSize, focalLen);
+      posit._modelSize = MODEL.markerSize;
+    }
+
+    // marker corners in image coords (centered)
+    const corners = m.corners.map(c => ({ x: c.x - W/2, y: H/2 - c.y }));
+    let pose;
+    try { pose = posit.pose(corners); } catch(e) { continue; }
+    if (!pose) continue;
+
+    // pose.bestRotation: 3x3 rotation matrix (camera←marker)
+    // pose.bestTranslation: [tx, ty, tz] in marker units (metres here)
+    const R = pose.bestRotation;
+    const T = pose.bestTranslation;
+
+    // Camera position in MODEL space
+    // Marker is at (el.x, el.y, el.z) in Rhino coords
+    // T gives camera position relative to marker in marker frame
+    // We need to rotate T back to world frame using R^T then add marker world pos
+    const tx = T[0], ty = T[1], tz = T[2];
+    // Camera world pos (Rhino coords: X right, Y forward, Z up)
+    const camX = el.x - (R[0][0]*tx + R[1][0]*ty + R[2][0]*tz);
+    const camY = el.y - (R[0][2]*tx + R[1][2]*ty + R[2][2]*tz);
+    const camZ = el.z - (R[0][1]*tx + R[1][1]*ty + R[2][1]*tz);
+
+    const dist = Math.sqrt(tx*tx + ty*ty + tz*tz).toFixed(2);
+
+    S.wx = camX; S.wy = camY; S.wz = camZ + 1.7; // eye height offset
+    S.anchor = { id:el.id, dist };
+
+    doFlash();
+    markSeen(el.id);
+    updateList();
+    showCard(el, dist);
+    setStatus('ok', `Ancorato: ${el.id} — ${dist}m`);
+
+    document.getElementById('d-mrk').textContent =
+      `MRK: id=${m.id} dist=${dist}m pos=(${camX.toFixed(2)},${camY.toFixed(2)},${camZ.toFixed(2)})`;
+    break;
+  }
+}
+
+// ═══════════════════════════════════
+// RENDER LOOP
+// ═══════════════════════════════════
+function loop(now) {
+  requestAnimationFrame(loop);
+  detectAruco(now);
+  updateCam();
+  renderer.render(scene, cam3);
+
+  // FPS
+  S.frames++;
+  if (now - S.fpsT > 1000) {
+    S.lastFps = S.frames;
+    S.frames = 0; S.fpsT = now;
+    if (S.dbg) document.getElementById('d-fps').textContent = `FPS: ${S.lastFps}`;
+  }
+  if (S.dbg) {
+    document.getElementById('d-imu').textContent =
+      `IMU: α${S.alpha.toFixed(0)}° β${S.beta.toFixed(0)}° γ${S.gamma.toFixed(0)}°`;
+    document.getElementById('d-pos').textContent =
+      `POS: x${S.wx.toFixed(2)} y${S.wy.toFixed(2)} z${S.wz.toFixed(2)}`;
+  }
+}
+
+function updateCam() {
+  // Three.js coords: X=right, Y=up, Z=toward viewer
+  cam3.position.set(S.wx, S.wz, -S.wy);
+  if (S.imuReady) cam3.quaternion.copy(imuQuat());
+}
+
+// ═══════════════════════════════════
+// CAMERA
+// ═══════════════════════════════════
 async function startCamera() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-      audio: false
+      video:{ facingMode:'environment', width:{ideal:1280}, height:{ideal:720} },
+      audio:false
     });
     video.srcObject = stream;
     await video.play();
-    state.camReady = true;
-    qrCanvas.width = video.videoWidth || 640;
-    qrCanvas.height = video.videoHeight || 480;
-    setStatus('warn', 'Inquadra un QR code');
-    initIMU();
+    S.camReady = true;
+    qc.width  = video.videoWidth  || 640;
+    qc.height = video.videoHeight || 480;
+    setStatus('warn', 'Camera OK — autorizza giroscopio');
+    initAruco();
     requestAnimationFrame(loop);
   } catch(e) {
-    setStatus('err', 'Camera non disponibile');
-    console.error(e);
+    setStatus('err', 'Camera non disponibile — controlla permessi Safari');
   }
 }
 
-// ═══════════════════════════════════════════════
-//  QR SCANNING
-// ═══════════════════════════════════════════════
-let lastQRTime = 0;
-const QR_INTERVAL = 400; // ms between scans
-
-function scanQR(now) {
-  if (!state.scanning) return;
-  if (now - lastQRTime < QR_INTERVAL) return;
-  lastQRTime = now;
-  if (!video.videoWidth) return;
-
-  qrCanvas.width = video.videoWidth;
-  qrCanvas.height = video.videoHeight;
-  qrCtx.drawImage(video, 0, 0);
-  const imgData = qrCtx.getImageData(0, 0, qrCanvas.width, qrCanvas.height);
-  const code = jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts: 'dontInvert' });
-
-  if (code) {
-    document.getElementById('dbg-qr').textContent = 'qr: ' + code.data;
-    handleQR(code.data);
-  }
+// ═══════════════════════════════════
+// UI
+// ═══════════════════════════════════
+function setStatus(type, txt) {
+  const dot = document.getElementById('sdot');
+  dot.className = type === 'ok' ? 'ok' : type === 'hot' ? 'hot' : '';
+  document.getElementById('stxt').textContent = txt;
 }
 
-function handleQR(data) {
-  // Try exact match first
-  let anchor = QR_ANCHORS[data];
-
-  // Try parsing format "RHINO_AR:ID:x,y,z"
-  if (!anchor && data.startsWith('RHINO_AR:')) {
-    const parts = data.split(':');
-    if (parts.length === 3) {
-      const id = parts[1];
-      const coords = parts[2].split(',').map(Number);
-      if (coords.length === 3 && !coords.some(isNaN)) {
-        anchor = { id, wx: coords[0], wy: coords[1], wz: coords[2] };
-        QR_ANCHORS[data] = anchor; // cache
-      }
-    }
-  }
-
-  if (!anchor) {
-    setStatus('warn', 'QR non riconosciuto');
-    return;
-  }
-
-  // Set camera world position based on QR anchor
-  // Assumption: when you scan a QR at floor level, you're ~0.5m away and ~1.7m up
-  // In a real scenario, we'd use the QR code perspective for distance estimation
-  // For PoC: anchor just tells us "you're near this element"
-  state.pos = {
-    x: anchor.wx - 0.5, // slight offset (standing in front)
-    y: anchor.wz + 1.7, // eye height
-    z: anchor.wy + 0.5
-  };
-  state.anchor = anchor;
-
-  // Flash + mark scanned
-  flash();
-  markScanned(anchor.id);
-  updateList();
-  showInfoCard(anchor.id);
-  setStatus('ok', `Ancorato: ${anchor.id}`);
-
-  document.getElementById('dbg-anchor').textContent =
-    `anchor: ${anchor.id} (${anchor.wx},${anchor.wy},${anchor.wz})`;
+function doFlash() {
+  const f = document.getElementById('flash');
+  f.classList.add('go');
+  setTimeout(() => f.classList.remove('go'), 180);
 }
 
-function flash() {
-  const el = document.getElementById('flash');
-  el.classList.add('go');
-  setTimeout(() => el.classList.remove('go'), 200);
-}
-
-// ═══════════════════════════════════════════════
-//  RENDER LOOP
-// ═══════════════════════════════════════════════
-function loop(now) {
-  requestAnimationFrame(loop);
-  scanQR(now);
-  updateCamera();
-  renderer.render(scene, camera3d);
-  updateDebug();
-}
-
-function updateCamera() {
-  if (!state.camReady) return;
-
-  // Position
-  camera3d.position.set(
-    state.pos.x,
-    state.pos.y,
-    -state.pos.z  // Rhino Y → Three -Z
-  );
-
-  // Orientation from IMU
-  if (state.oriented) {
-    const q = imuToQuaternion(state.alpha, state.beta, state.gamma);
-    camera3d.quaternion.copy(q);
-  }
-}
-
-// ═══════════════════════════════════════════════
-//  UI HELPERS
-// ═══════════════════════════════════════════════
-function setStatus(type, text) {
-  const dot = document.getElementById('status-dot');
-  const label = document.getElementById('status-text');
-  dot.className = '';
-  if (type === 'ok') dot.classList.add('ok');
-  if (type === 'scan') dot.classList.add('scan');
-  label.textContent = text;
-}
-
-function showInfoCard(id) {
-  const el = MODEL.elements.find(e => e.id === id);
-  if (!el) return;
-  document.getElementById('ic-id').textContent = el.id;
-  document.getElementById('ic-type').textContent = el.type.toUpperCase();
-  const coords = el.type === 'column'
+function showCard(el, dist) {
+  document.getElementById('c-id').textContent = el.id;
+  document.getElementById('c-type').textContent = el.type.toUpperCase();
+  const p = el.type==='column'
     ? `x:${el.x}m  y:${el.y}m  z:${el.z}m`
-    : `x1:${el.x1}m  y1:${el.y1}m → x2:${el.x2}m  y2:${el.y2}m`;
-  document.getElementById('ic-coords').textContent = coords;
-  const card = document.getElementById('info-card');
+    : `(${el.x1},${el.y1}) → (${el.x2},${el.y2})  z:${el.z}m`;
+  document.getElementById('c-pos').textContent = p;
+  document.getElementById('c-dist').textContent = `Distanza rilevata: ${dist}m`;
+  const card = document.getElementById('card');
   card.classList.add('show');
-  setTimeout(() => card.classList.remove('show'), 4000);
+  clearTimeout(card._t);
+  card._t = setTimeout(() => card.classList.remove('show'), 5000);
 }
 
 function buildList() {
-  const body = document.getElementById('el-list-body');
+  const body = document.getElementById('elist-body');
   body.innerHTML = '';
   MODEL.elements.forEach(el => {
-    const row = document.createElement('div');
-    row.className = 'el-row';
-    row.id = 'row-' + el.id;
-    row.innerHTML = `<div class="dot"></div><div class="name">${el.id}</div><div class="type-tag">${el.type}</div>`;
-    body.appendChild(row);
+    const r = document.createElement('div');
+    r.className = 'erow'; r.id = 'er-'+el.id;
+    r.innerHTML = `<div class="edot"></div><div class="ename">${el.id}</div><div class="etag">${el.type}</div>`;
+    body.appendChild(r);
   });
 }
 
 function updateList() {
-  state.scannedIds.forEach(id => {
-    const row = document.getElementById('row-' + id);
-    if (row) row.classList.add('scanned');
+  S.seen.forEach(id => {
+    const r = document.getElementById('er-'+id);
+    if (r) r.classList.add('seen');
   });
 }
 
-function updateDebug() {
-  if (!state.debugMode) return;
-  document.getElementById('dbg-pos').textContent =
-    `pos: x${state.pos.x.toFixed(2)} y${state.pos.y.toFixed(2)} z${state.pos.z.toFixed(2)}`;
-  document.getElementById('dbg-rot').textContent =
-    `rot: α${state.alpha.toFixed(0)}° β${state.beta.toFixed(0)}° γ${state.gamma.toFixed(0)}°`;
-}
-
-// ═══════════════════════════════════════════════
-//  BOOT
-// ═══════════════════════════════════════════════
-document.getElementById('start-btn').addEventListener('click', async () => {
-  document.getElementById('splash').style.opacity = '0';
-  setTimeout(() => document.getElementById('splash').style.display = 'none', 500);
+// ═══════════════════════════════════
+// BOOT & EVENTS
+// ═══════════════════════════════════
+document.getElementById('btn-start').addEventListener('click', async () => {
+  const splash = document.getElementById('splash');
+  splash.style.opacity = '0';
+  setTimeout(() => splash.style.display='none', 400);
   initThree();
   buildList();
   await startCamera();
-});
 
-document.getElementById('btn-scan').addEventListener('click', () => {
-  state.scanning = !state.scanning;
-  const btn = document.getElementById('btn-scan');
-  btn.classList.toggle('active', state.scanning);
-  const dot = document.getElementById('status-dot');
-  if (state.scanning) {
-    setStatus('scan', 'Scansione QR attiva…');
+  // On iOS: show gyro modal after camera starts (needs user gesture)
+  const needsPerm = typeof DeviceOrientationEvent !== 'undefined' &&
+                    typeof DeviceOrientationEvent.requestPermission === 'function';
+  if (needsPerm) {
+    setTimeout(() => document.getElementById('perm-modal').classList.add('show'), 600);
   } else {
-    setStatus(state.anchor ? 'ok' : 'warn', state.anchor ? `Ancorato: ${state.anchor.id}` : 'Scansione fermata');
+    // Android/desktop: request directly
+    await requestGyro();
   }
 });
 
-document.getElementById('btn-list').addEventListener('click', () => {
-  state.listOpen = !state.listOpen;
-  document.getElementById('el-list').classList.toggle('open', state.listOpen);
-  document.getElementById('btn-list').classList.toggle('active', state.listOpen);
+document.getElementById('btn-gyro-ok').addEventListener('click', async () => {
+  document.getElementById('perm-modal').classList.remove('show');
+  const ok = await requestGyro();
+  if (!ok) setStatus('warn', 'Giroscopio negato — modello statico');
 });
 
-document.getElementById('btn-reset').addEventListener('click', () => {
-  state.pos = { x: 0, y: 1.7, z: 0 };
-  state.anchor = null;
-  state.scannedIds.clear();
-  state.scanning = false;
-  document.getElementById('btn-scan').classList.remove('active');
-  buildModel();
-  buildList();
-  setStatus('warn', 'Reset — inquadra un QR');
+document.getElementById('btn-gyro-skip').addEventListener('click', () => {
+  document.getElementById('perm-modal').classList.remove('show');
+  setStatus('warn', 'Senza giroscopio il modello non ruota');
 });
 
-document.getElementById('btn-debug').addEventListener('click', () => {
-  state.debugMode = !state.debugMode;
-  document.getElementById('debug').classList.toggle('show', state.debugMode);
-  document.getElementById('btn-debug').classList.toggle('active', state.debugMode);
+document.getElementById('tb-gyro').addEventListener('click', async () => {
+  document.getElementById('perm-modal').classList.add('show');
+});
+
+document.getElementById('tb-list').addEventListener('click', () => {
+  S.listOpen = !S.listOpen;
+  document.getElementById('elist').classList.toggle('open', S.listOpen);
+  document.getElementById('tb-list').classList.toggle('on', S.listOpen);
+});
+
+document.getElementById('tb-reset').addEventListener('click', () => {
+  S.wx=0; S.wy=-2; S.wz=1.7;
+  S.anchor=null; S.seen.clear();
+  buildModel(); buildList();
+  setStatus('warn', 'Reset — cerca un marker ArUco');
+});
+
+document.getElementById('tb-dbg').addEventListener('click', () => {
+  S.dbg = !S.dbg;
+  document.getElementById('dbg').classList.toggle('show', S.dbg);
+  document.getElementById('tb-dbg').classList.toggle('on', S.dbg);
 });
 </script>
 </body>
