@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Step H — Modello completo</title>
+<title>Step I — Ancora persistente</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family: Arial, sans-serif; background:#000; color:#fff; overflow:hidden; height:100dvh; width:100vw; }
@@ -27,6 +27,14 @@ button {
 }
 button:active { opacity:.8; }
 
+#perm-modal {
+  position:fixed; inset:0; z-index:150; background:rgba(10,10,15,.95);
+  display:none; flex-direction:column; align-items:center; justify-content:center;
+  gap:1.2rem; padding:2rem; text-align:center;
+}
+#perm-modal.show { display:flex; }
+.ico { font-size:2.5rem; }
+
 #cam { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; }
 #c3d { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:2; }
 #overlay { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:3; }
@@ -34,10 +42,12 @@ button:active { opacity:.8; }
 #status {
   position:fixed; top:1rem; left:1rem; right:1rem;
   background:rgba(10,10,15,.78); backdrop-filter:blur(10px);
-  padding:.55rem .85rem; border-left:3px solid #e8410a;
+  padding:.55rem .85rem; border-left:3px solid #f0a500;
   font-size:.7rem; letter-spacing:.06em; text-transform:uppercase;
   pointer-events:none; z-index:10;
 }
+#status.anchored { border-left-color:#1a9e5c; }
+#status.searching { border-left-color:#e8410a; }
 
 #info {
   position:fixed; bottom:1rem; left:1rem; right:1rem;
@@ -58,27 +68,33 @@ button:active { opacity:.8; }
 .legend-sw { width:12px; height:12px; border:1px solid rgba(255,255,255,.3); }
 
 .tb {
-  position:fixed; bottom:6.5rem; right:1rem;
+  position:fixed; right:1rem;
   background:rgba(10,10,15,.78); backdrop-filter:blur(10px);
   border:1px solid rgba(255,255,255,.15); color:#fff;
   font-family:Arial; font-size:.62rem; letter-spacing:.06em; text-transform:uppercase;
   padding:.45rem .75rem; cursor:pointer; z-index:11;
-  margin-bottom: .3rem; display:block;
 }
 .tb.on { border-color:#e8410a; color:#e8410a; }
+#tb-2d { bottom:7.3rem; }
+#tb-reanchor { bottom:5.8rem; }
 </style>
 </head>
 <body>
 
 <div id="splash">
-  <div class="version">v1.1 — Step H: modello completo</div>
-  <h1>STEP <span>H</span></h1>
-  <p>Il marker funziona come ancora del modello Rhino. Inquadrando un marker noto, l'intero edificio appare nello spazio attorno a te.</p>
-  <label>
-    Dim. marker (mm)
+  <div class="version">v1.2 — Step I: ancora persistente + IMU</div>
+  <h1>STEP <span>I</span></h1>
+  <p>Inquadra un marker per ancorare. Una volta ancorato, il modello resta nello spazio. Girando il telefono guardi attorno.</p>
+  <label>Dim. marker (mm)
     <input type="number" id="marker-size" value="50" min="10" max="500">
   </label>
   <button id="btn-start">AVVIA</button>
+</div>
+
+<div id="perm-modal">
+  <div class="ico">📡</div>
+  <p>Autorizza il giroscopio per il tracking della rotazione.</p>
+  <button id="btn-gyro">AUTORIZZA</button>
 </div>
 
 <video id="cam" autoplay playsinline muted></video>
@@ -87,6 +103,7 @@ button:active { opacity:.8; }
 <canvas id="work" style="display:none"></canvas>
 
 <button class="tb" id="tb-2d">2D OVERLAY</button>
+<button class="tb" id="tb-reanchor">RE-ANCHOR</button>
 
 <div id="status">In attesa…</div>
 
@@ -98,16 +115,16 @@ button:active { opacity:.8; }
 </div>
 
 <div id="info">
-  <div class="kv"><span>Marker ID</span><span id="i-id">—</span></div>
-  <div class="kv"><span>Elemento</span><span id="i-el">—</span></div>
+  <div class="kv"><span>Stato</span><span id="i-state">cerca marker</span></div>
+  <div class="kv"><span>Marker</span><span id="i-id">—</span></div>
   <div class="kv"><span>Distanza</span><span id="i-d">—</span></div>
-  <div class="kv"><span>Visti</span><span id="i-seen">—</span></div>
+  <div class="kv"><span>IMU yaw</span><span id="i-yaw">—</span></div>
   <div class="kv"><span>FPS</span><span id="i-fps">—</span></div>
 </div>
 
 <script>
 // ═══════════════════════════════════════════════
-// ARUCO + POSIT (js-aruco2 v2.0.0 — MIT — inline)
+// ARUCO + POSIT (inline)
 // ═══════════════════════════════════════════════
 /*
 Copyright (c) 2012 Juan Mellado
@@ -2137,21 +2154,14 @@ POS.Pose = function(error1, rotation1, translation1, error2, rotation2, translat
 'use strict';
 
 // ═══════════════════════════════════════════════
-// MODEL — sostituire con export Rhino
-// Coordinate Rhino: X=destra, Y=avanti, Z=alto. Unità: metri.
-// Ogni MARKER ha posizione e orientamento nel modello.
-//   ax, ay, az = posizione marker (centro) nel mondo Rhino
-//   normal     = direzione normale del marker (perpendicolare al piano)
-//                'up' = marker steso a terra, faccia verso il cielo
-//                'wall_+x', 'wall_-x', 'wall_+y', 'wall_-y' = parete con normale lungo asse
+// MODEL
 // ═══════════════════════════════════════════════
 const MODEL = {
   markers: [
-    // 4 marker, uno per pilastro, stesi a terra alla base del pilastro
-    { id: 0, name: 'PIL-A1', ax: 0, ay: 0, az: 0, normal: 'up', forward: 'y' },
-    { id: 1, name: 'PIL-A2', ax: 5, ay: 0, az: 0, normal: 'up', forward: 'y' },
-    { id: 2, name: 'PIL-B1', ax: 0, ay: 4, az: 0, normal: 'up', forward: 'y' },
-    { id: 3, name: 'PIL-B2', ax: 5, ay: 4, az: 0, normal: 'up', forward: 'y' },
+    { id: 0, name: 'PIL-A1', ax: 0, ay: 0, az: 0 },
+    { id: 1, name: 'PIL-A2', ax: 5, ay: 0, az: 0 },
+    { id: 2, name: 'PIL-B1', ax: 0, ay: 4, az: 0 },
+    { id: 3, name: 'PIL-B2', ax: 5, ay: 4, az: 0 },
   ],
   elements: [
     { id:'PIL-A1', type:'column', x:0, y:0, z:0, h:3.2, r:0.15 },
@@ -2165,13 +2175,11 @@ const MODEL = {
     { id:'PAR-1', type:'wall', x1:5, y1:0, x2:5, y2:4, z:0, h:3.2, t:0.2 },
   ]
 };
-
-// Lookup
 const MARKER_MAP = {};
 MODEL.markers.forEach(m => { MARKER_MAP[m.id] = m; });
 
 // ═══════════════════════════════════════════════
-// CAMERA & TRACKING STATE
+// DOM REFS
 // ═══════════════════════════════════════════════
 const video    = document.getElementById('cam');
 const overlay  = document.getElementById('overlay');
@@ -2180,23 +2188,49 @@ const work     = document.getElementById('work');
 const workCtx  = work.getContext('2d', { willReadFrequently: true });
 const c3d      = document.getElementById('c3d');
 
+// ═══════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════
 let detector, posit;
 let renderer, scene, cam3, modelGroup;
 let MARKER_SIZE_M = 0.05;
 let SHOW_2D = true;
 
+// IMU
+const IMU = { a:0, b:0, g:0, ready:false };
+
+// ANCHOR STATE — the key idea of Step I
+// When the marker is seen, we save:
+//   1. The "world position" of the camera at the moment of anchor
+//      (this is just: where the model was in camera-space, inverted)
+//   2. The IMU quaternion AT the moment of anchor
+// From that point on:
+//   cam.quaternion = anchor.imu⁻¹ · current.imu · anchor.cam_quat
+//   cam.position   = anchor.cam_pos  (frozen — Step L will fix this)
+const ANCHOR = {
+  set: false,
+  cameraQuat: new THREE.Quaternion(),    // camera orientation in WORLD at anchor time
+  cameraPos:  new THREE.Vector3(),       // camera position in WORLD at anchor time
+  imuQuatAtAnchor: new THREE.Quaternion(), // IMU quat at anchor moment
+  modelMatrix: new THREE.Matrix4(),      // model placement in WORLD, frozen after anchor
+};
+
 const STATE = {
   camOk:false, threeOk:false,
   fpsT:0, frameCount:0, fpsLast:0,
-  seenIds: new Set(),
   lastSeenT: 0,
 };
 
-function setStatus(t) { document.getElementById('status').textContent = t; }
+function setStatus(t, kind) {
+  document.getElementById('status').textContent = t;
+  const el = document.getElementById('status');
+  el.classList.remove('anchored', 'searching');
+  if (kind) el.classList.add(kind);
+}
 
-// ─────────────────────────────────────
+// ═══════════════════════════════════════════════
 // CAMERA
-// ─────────────────────────────────────
+// ═══════════════════════════════════════════════
 async function startCamera() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -2240,18 +2274,54 @@ function draw2D(markers, T) {
     overCtx.strokeStyle = MARKER_MAP[m.id] ? '#1a9e5c' : '#f0a500';
     overCtx.lineWidth = 3;
     overCtx.stroke();
-    const cx = (pts[0].x+pts[2].x)/2, cy=(pts[0].y+pts[2].y)/2;
-    overCtx.fillStyle = 'rgba(0,0,0,.7)';
-    overCtx.fillRect(cx-22, cy-12, 44, 24);
-    overCtx.fillStyle = '#fff';
-    overCtx.font = 'bold 14px Arial'; overCtx.textAlign='center'; overCtx.textBaseline='middle';
-    overCtx.fillText(m.id, cx, cy);
   }
 }
 
-// ─────────────────────────────────────
-// THREE.JS SCENE — full Rhino model
-// ─────────────────────────────────────
+// ═══════════════════════════════════════════════
+// IMU
+// ═══════════════════════════════════════════════
+function onOrientation(e) {
+  if (e.alpha === null && e.beta === null) return;
+  IMU.a = e.alpha || 0;
+  IMU.b = e.beta  || 0;
+  IMU.g = e.gamma || 0;
+  IMU.ready = true;
+}
+
+async function requestGyro() {
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    try {
+      const r = await DeviceOrientationEvent.requestPermission();
+      if (r === 'granted') {
+        window.addEventListener('deviceorientation', onOrientation, true);
+        return true;
+      }
+    } catch(e) {}
+    return false;
+  }
+  window.addEventListener('deviceorientation', onOrientation, true);
+  return true;
+}
+
+// W3C standard IMU → camera quaternion (same proven formula from Step D)
+function imuToCamQuat() {
+  const a = THREE.MathUtils.degToRad(IMU.a);
+  const b = THREE.MathUtils.degToRad(IMU.b);
+  const g = THREE.MathUtils.degToRad(IMU.g);
+
+  const qDev = new THREE.Quaternion();
+  qDev.setFromEuler(new THREE.Euler(b, a, -g, 'YXZ'));
+
+  const align = new THREE.Quaternion().setFromAxisAngle(
+    new THREE.Vector3(1, 0, 0), -Math.PI / 2
+  );
+  return qDev.multiply(align);
+}
+
+// ═══════════════════════════════════════════════
+// THREE.JS SCENE
+// ═══════════════════════════════════════════════
 function initThree() {
   renderer = new THREE.WebGLRenderer({ canvas: c3d, alpha: true, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -2266,16 +2336,11 @@ function initThree() {
   const dir = new THREE.DirectionalLight(0xffffff, 0.5);
   dir.position.set(2, 5, 3); scene.add(dir);
 
-  // modelGroup contains all model elements in RHINO coordinates.
-  // We transform the whole group based on the marker pose so that
-  // (0,0,0) in modelGroup maps to whatever world point the anchor marker
-  // says is the model origin.
   modelGroup = new THREE.Group();
   modelGroup.visible = false;
   scene.add(modelGroup);
 
   buildModel(modelGroup);
-
   STATE.threeOk = true;
 
   window.addEventListener('resize', () => {
@@ -2286,134 +2351,52 @@ function initThree() {
   });
 }
 
-// Build the model in its own coordinate system: Rhino convention
-// (X right, Y forward, Z up). The whole group will be rotated later
-// so that Rhino Z maps to Three.js Y.
 function buildModel(group) {
   const COL = 0x4a9eff, BEAM = 0xff8c2e, WALL = 0xf5f2eb;
 
   MODEL.elements.forEach(el => {
     let mesh;
     if (el.type === 'column') {
-      // CylinderGeometry has axis along Y by default. We want it along
-      // Rhino Z, which we'll handle by rotating below.
       const g = new THREE.CylinderGeometry(el.r, el.r, el.h, 12);
-      mesh = new THREE.Mesh(g, new THREE.MeshPhongMaterial({
-        color: COL, opacity:.55, transparent:true
-      }));
-      mesh.rotation.x = Math.PI/2; // align Y → Z (Rhino vertical)
+      mesh = new THREE.Mesh(g, new THREE.MeshPhongMaterial({ color:COL, opacity:.55, transparent:true }));
+      mesh.rotation.x = Math.PI/2;
       mesh.position.set(el.x, el.y, el.z + el.h/2);
-      const edges = new THREE.LineSegments(
-        new THREE.EdgesGeometry(g),
-        new THREE.LineBasicMaterial({ color:COL })
-      );
-      mesh.add(edges);
+      mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({ color:COL })));
 
     } else if (el.type === 'beam' || el.type === 'wall') {
       const dx = el.x2-el.x1, dy = el.y2-el.y1;
       const len = Math.hypot(dx, dy);
       const w = el.type === 'beam' ? el.w : el.t;
-      const h = el.type === 'beam' ? el.h : el.h;
-      // Box: X = length, Y = width, Z = height
+      const h = el.h;
       const g = new THREE.BoxGeometry(len, w, h);
       const color = el.type === 'beam' ? BEAM : WALL;
       const opacity = el.type === 'beam' ? .55 : .25;
-      mesh = new THREE.Mesh(g, new THREE.MeshPhongMaterial({
-        color, opacity, transparent:true
-      }));
+      mesh = new THREE.Mesh(g, new THREE.MeshPhongMaterial({ color, opacity, transparent:true }));
       mesh.position.set((el.x1+el.x2)/2, (el.y1+el.y2)/2, el.z + h/2);
       mesh.rotation.z = Math.atan2(dy, dx);
-      const edges = new THREE.LineSegments(
-        new THREE.EdgesGeometry(g),
-        new THREE.LineBasicMaterial({ color })
-      );
-      mesh.add(edges);
+      mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({ color })));
     }
-    if (mesh) {
-      mesh.userData.id = el.id;
-      group.add(mesh);
-    }
+    if (mesh) group.add(mesh);
   });
 
-  // Marker positions: small orange squares for visual reference
   MODEL.markers.forEach(mk => {
     const s = MARKER_SIZE_M;
     const g = new THREE.BoxGeometry(s, s, 0.005);
-    const mesh = new THREE.Mesh(g, new THREE.MeshPhongMaterial({
-      color: 0xe8410a, opacity: 0.9, transparent: true
-    }));
+    const mesh = new THREE.Mesh(g, new THREE.MeshPhongMaterial({ color:0xe8410a, opacity:.9, transparent:true }));
     mesh.position.set(mk.ax, mk.ay, mk.az);
     group.add(mesh);
   });
 
-  // Origin marker (red sphere) + axes
-  const originSphere = new THREE.Mesh(
-    new THREE.SphereGeometry(0.05, 8, 8),
-    new THREE.MeshPhongMaterial({ color: 0xff0000 })
-  );
-  group.add(originSphere);
+  group.add(new THREE.Mesh(new THREE.SphereGeometry(0.05,8,8), new THREE.MeshPhongMaterial({ color:0xff0000 })));
   group.add(new THREE.AxesHelper(0.3));
 }
 
-// ─────────────────────────────────────
-// POSE: marker → modelGroup transform
-// ─────────────────────────────────────
-// POSIT gives us: marker pose in CAMERA frame (in Three.js camera space
-// after our Z flip from previous step).
-// We want: modelGroup pose in WORLD (= camera) space such that the marker's
-// world position (ax, ay, az) lands exactly where POSIT says it should.
-//
-// Strategy: build a "marker mount" Object3D positioned at (ax, ay, az) of
-// the marker inside the model's Rhino frame, with orientation matching the
-// marker's physical orientation (e.g. flat on the floor with corner 0 pointing
-// in +Y direction). Then put the entire modelGroup as a child of this mount,
-// and finally transform the mount with the POSIT pose.
-//
-// Simpler equivalent: compute the marker→world transform (M_m2w) once per
-// marker config, then for each frame:
-//   modelGroup.matrix = pose_three  · M_m2w⁻¹
-//
-// (pose_three is the marker's pose in Three.js camera space.)
-
-// Pre-compute, for each known marker, the Rhino-frame matrix that places
-// a unit marker (XY plane, +Z normal, corner 0 at +X+Y, corner 1 at -X+Y,
-// corner 2 at -X-Y, corner 3 at +X-Y — js-aruco2 corner order) at the
-// marker's location in the model.
-function buildMarkerMounts() {
-  const mounts = {};
-  MODEL.markers.forEach(mk => {
-    // Local marker frame: X right, Y up (on marker plane), Z normal out.
-    // For a marker lying flat on the floor (normal='up'), the marker plane
-    // coincides with Rhino's XY (Z up). So the marker's local Z aligns with
-    // Rhino +Z. We may want the marker's local +Y to point in Rhino +Y
-    // (so the printed marker's "up" side points "forward" in the model).
-    const mount = new THREE.Matrix4();
-    if (mk.normal === 'up') {
-      // Marker XY plane = Rhino XY plane, marker +Z = Rhino +Z.
-      // The marker's local axes coincide with Rhino's. Identity rotation.
-      mount.makeTranslation(mk.ax, mk.ay, mk.az);
-    } else {
-      // Other orientations (walls) can be added later. Default to identity for now.
-      mount.makeTranslation(mk.ax, mk.ay, mk.az);
-    }
-    mounts[mk.id] = mount;
-  });
-  return mounts;
-}
-
-let MARKER_MOUNTS = null; // built once after MODEL is finalized
-
-// Convert POSIT pose to Three.js camera-space matrix (the marker's pose).
-// This is the SAME math as in Step F.
+// ═══════════════════════════════════════════════
+// POSIT → Three.js (same as Step F)
+// ═══════════════════════════════════════════════
 function posit2three(pose) {
   const R = pose.bestRotation;
   const T = pose.bestTranslation;
-
-  // Position: Y already in math convention (we flipped corners on input),
-  // Z flipped (POSIT forward → Three -Z).
-  const pos = new THREE.Vector3(T[0], T[1], -T[2]);
-
-  // Rotation: negate row 3 and col 3 (except [Z][Z]).
   const m = new THREE.Matrix4();
   m.set(
      R[0][0],  R[0][1], -R[0][2], 0,
@@ -2421,35 +2404,100 @@ function posit2three(pose) {
     -R[2][0], -R[2][1],  R[2][2], 0,
      0,        0,        0,       1
   );
-  m.setPosition(pos);
+  m.setPosition(new THREE.Vector3(T[0], T[1], -T[2]));
   return m;
 }
 
-// Place the modelGroup so that the markerId's position in MODEL coincides
-// with where POSIT says the marker is in camera space.
-function applyAnchor(markerId, pose) {
-  const mount = MARKER_MOUNTS[markerId];
-  if (!mount) return;
+// ═══════════════════════════════════════════════
+// ANCHOR LOGIC — the heart of Step I
+// ═══════════════════════════════════════════════
+//
+// When we see a marker, we know:
+//   M_marker_in_cam = posit2three(pose)
+//   the marker corresponds to a known point in the MODEL: (ax, ay, az)
+//
+// We want to PLACE the modelGroup in WORLD (Three.js) coordinates such that
+// the model's point (ax, ay, az) lands at M_marker_in_cam.
+//
+// At the moment of anchor, "world coordinates" = "camera coordinates":
+// we treat the camera as the origin of world. The model gets placed
+// somewhere in the world (relative to where the camera was at anchor time).
+//
+// AFTER anchor:
+//   - modelGroup matrix STAYS the same forever (model is now fixed in world)
+//   - camera position stays the same (frozen — Step L will fix)
+//   - camera ROTATION updates based on IMU delta since anchor
+//
+// We freeze the IMU quaternion at anchor moment. Each subsequent frame:
+//   delta = current_imu_quat · anchor_imu_quat⁻¹
+//   cam.quaternion = anchor.cameraQuat   (which is identity since cam was at origin)
+//                    but rotated by delta to follow the phone movement.
+//
+// Actually simpler: at anchor moment, the camera "is looking" in the direction
+// determined by the IMU at that moment. As IMU changes, the world appears to
+// rotate around the camera. The camera quaternion is just the current IMU quat
+// MINUS the anchor IMU quat (in quaternion algebra: current · anchor⁻¹).
 
-  const posit_three = posit2three(pose);
+function doAnchor(markerId, pose) {
+  const mk = MARKER_MAP[markerId];
+  if (!mk) return;
 
-  // modelGroup transform: pose_in_camera · mount⁻¹
-  // i.e. take a point in model coordinates → apply mount⁻¹ → it's now in
-  // marker-local coords → apply pose_in_camera → it's in camera/world coords.
-  const mountInv = new THREE.Matrix4().copy(mount).invert();
-  const finalMatrix = new THREE.Matrix4().multiplyMatrices(posit_three, mountInv);
+  // 1. Marker pose in camera space (at this moment)
+  const markerInCam = posit2three(pose);
 
+  // 2. Translation from marker frame to model origin:
+  //    marker is at (ax, ay, az) in model. To go from marker-local (0,0,0) to
+  //    model origin, translate by (-ax, -ay, -az).
+  const markerToModelOrigin = new THREE.Matrix4().makeTranslation(-mk.ax, -mk.ay, -mk.az);
+
+  // 3. Full model placement: model_origin_in_cam = markerInCam · markerToModelOrigin
+  const modelInCam = new THREE.Matrix4().multiplyMatrices(markerInCam, markerToModelOrigin);
+
+  // 4. We're "freezing" this. From this moment on, modelGroup.matrix = modelInCam,
+  //    EXPRESSED IN WORLD COORDINATES. Currently world == camera (camera at origin).
+  //    But we'll rotate the camera with the IMU delta, so the world is fixed and
+  //    the camera moves around it.
+  //
+  //    The trick: when we anchor, we ALSO set the camera position+rotation to
+  //    where it physically is right now. Camera position stays at (0,0,0) but
+  //    its orientation should match what the IMU is reading.
+  //
+  //    Easier formulation:
+  //      anchor.modelMatrix = modelInCam (relative to camera at anchor time)
+  //      anchor.imuAtAnchor = current IMU quat
+  //      cam.quaternion(t) = currentIMU · anchorIMU⁻¹  (delta rotation)
+  //      cam.position stays at (0,0,0) — model is rendered relative to camera
+
+  ANCHOR.modelMatrix.copy(modelInCam);
+  ANCHOR.imuQuatAtAnchor.copy(imuToCamQuat());
+  ANCHOR.cameraPos.set(0, 0, 0);
+  ANCHOR.cameraQuat.identity();
+  ANCHOR.set = true;
+
+  // Apply to scene
   modelGroup.matrixAutoUpdate = false;
-  modelGroup.matrix.copy(finalMatrix);
+  modelGroup.matrix.copy(ANCHOR.modelMatrix);
   modelGroup.matrixWorldNeedsUpdate = true;
   modelGroup.visible = true;
 }
 
-// ─────────────────────────────────────
+// Each frame: update camera based on IMU delta from anchor moment
+function updateCameraFromIMU() {
+  if (!ANCHOR.set || !IMU.ready) return;
+  const current = imuToCamQuat();
+  // Delta = current · anchor⁻¹
+  const anchorInv = ANCHOR.imuQuatAtAnchor.clone().invert();
+  const delta = current.multiply(anchorInv);
+  // cam quat = delta · anchor.cameraQuat(=identity) = delta
+  cam3.quaternion.copy(delta);
+  cam3.position.copy(ANCHOR.cameraPos);
+}
+
+// ═══════════════════════════════════════════════
 // MAIN LOOP
-// ─────────────────────────────────────
+// ═══════════════════════════════════════════════
 let lastDetect = 0;
-const DETECT_INTERVAL = 80;
+const DETECT_INTERVAL = 100;
 
 function loop(now) {
   requestAnimationFrame(loop);
@@ -2458,6 +2506,7 @@ function loop(now) {
   const vw = video.videoWidth, vh = video.videoHeight;
   if (!vw) return;
 
+  // Detection cadence
   if (now - lastDetect >= DETECT_INTERVAL) {
     lastDetect = now;
     work.width = vw; work.height = vh;
@@ -2470,51 +2519,54 @@ function loop(now) {
     const T = getCoverTransform(vw, vh);
     draw2D(markers, T);
 
-    // Use the first KNOWN marker (one that's in MARKER_MAP)
     let usedMarker = null;
     if (markers && markers.length) {
-      for (const m of markers) {
-        if (MARKER_MAP[m.id]) { usedMarker = m; break; }
-      }
+      for (const m of markers) if (MARKER_MAP[m.id]) { usedMarker = m; break; }
     }
 
     if (usedMarker) {
-      // POSIT
       const focalPx = vw * 0.85;
       if (!posit) posit = new POS.Posit(MARKER_SIZE_M, focalPx);
       const corners = usedMarker.corners.map(c => ({ x: c.x - vw/2, y: vh/2 - c.y }));
       let pose;
       try { pose = posit.pose(corners); } catch(e) { return; }
       if (pose) {
-        applyAnchor(usedMarker.id, pose);
-
+        // Only set the anchor if we don't have one yet
+        if (!ANCHOR.set) {
+          doAnchor(usedMarker.id, pose);
+          // Sync FOV
+          const vFov = 2 * Math.atan((vh/2) / focalPx) * 180 / Math.PI;
+          if (Math.abs(cam3.fov - vFov) > 0.5) {
+            cam3.fov = vFov;
+            cam3.updateProjectionMatrix();
+          }
+        }
         const mk = MARKER_MAP[usedMarker.id];
-        STATE.seenIds.add(usedMarker.id);
-        STATE.lastSeenT = now;
         const T_ = pose.bestTranslation;
         const dist = Math.sqrt(T_[0]*T_[0]+T_[1]*T_[1]+T_[2]*T_[2]);
-        document.getElementById('i-id').textContent = usedMarker.id;
-        document.getElementById('i-el').textContent = mk.name;
+        document.getElementById('i-id').textContent = `${usedMarker.id} (${mk.name})`;
         document.getElementById('i-d').textContent = dist.toFixed(2)+' m';
-        document.getElementById('i-seen').textContent =
-          `${STATE.seenIds.size}/${MODEL.markers.length}`;
-        setStatus(`Ancorato: ${mk.name}`);
-
-        // Sync FOV
-        const vFov = 2 * Math.atan((vh/2) / focalPx) * 180 / Math.PI;
-        if (Math.abs(cam3.fov - vFov) > 0.5) {
-          cam3.fov = vFov;
-          cam3.updateProjectionMatrix();
-        }
+        STATE.lastSeenT = now;
       }
-    } else {
-      // No known marker visible; hide model after 1s grace period
-      if (now - STATE.lastSeenT > 1000) modelGroup.visible = false;
     }
   }
 
+  // Continuously update camera from IMU (independent of detection cadence)
+  updateCameraFromIMU();
+
+  // Status
+  if (ANCHOR.set) {
+    setStatus('Ancorato — esplora con il telefono', 'anchored');
+    document.getElementById('i-state').textContent = 'ANCORATO';
+  } else {
+    setStatus('Inquadra un marker per ancorare', 'searching');
+    document.getElementById('i-state').textContent = 'cerca marker';
+  }
+  document.getElementById('i-yaw').textContent = IMU.ready ? IMU.a.toFixed(0)+'°' : '—';
+
   renderer.render(scene, cam3);
 
+  // FPS
   STATE.frameCount++;
   if (now - STATE.fpsT > 1000) {
     STATE.fpsLast = STATE.frameCount;
@@ -2523,29 +2575,42 @@ function loop(now) {
   }
 }
 
-// ─────────────────────────────────────
+// ═══════════════════════════════════════════════
 // BOOT
-// ─────────────────────────────────────
+// ═══════════════════════════════════════════════
 document.getElementById('btn-start').addEventListener('click', async () => {
   const sizeMm = parseFloat(document.getElementById('marker-size').value);
   if (sizeMm > 0) MARKER_SIZE_M = sizeMm / 1000;
   document.getElementById('splash').style.display = 'none';
   resizeOverlay();
 
-  if (typeof AR === 'undefined' || typeof POS === 'undefined') {
-    setStatus('ERR: ArUco/POSIT non caricati'); return;
+  if (typeof AR === 'undefined' || typeof POS === 'undefined' || typeof THREE === 'undefined') {
+    setStatus('ERR libreria non caricata'); return;
   }
-  if (typeof THREE === 'undefined') {
-    setStatus('ERR: Three.js non caricato'); return;
-  }
-
   detector = new AR.Detector();
   initThree();
-  MARKER_MOUNTS = buildMarkerMounts();
   const ok = await startCamera();
   if (!ok) return;
-  setStatus(`Pronto — marker ${(MARKER_SIZE_M*1000).toFixed(0)}mm — punta un marker (ID 0-3)`);
+  setStatus('Camera OK — autorizza giroscopio');
+
+  // Request gyro permission
+  const needsPerm = typeof DeviceOrientationEvent !== 'undefined' &&
+                    typeof DeviceOrientationEvent.requestPermission === 'function';
+  if (needsPerm) {
+    document.getElementById('perm-modal').classList.add('show');
+  } else {
+    await requestGyro();
+    setStatus('Inquadra un marker per ancorare', 'searching');
+  }
+
   requestAnimationFrame(loop);
+});
+
+document.getElementById('btn-gyro').addEventListener('click', async () => {
+  document.getElementById('perm-modal').classList.remove('show');
+  const ok = await requestGyro();
+  if (!ok) setStatus('Giroscopio negato — la rotazione non funzionerà');
+  else setStatus('Inquadra un marker per ancorare', 'searching');
 });
 
 document.getElementById('tb-2d').addEventListener('click', () => {
@@ -2554,6 +2619,12 @@ document.getElementById('tb-2d').addEventListener('click', () => {
   if (!SHOW_2D) overCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
 });
 document.getElementById('tb-2d').classList.add('on');
+
+document.getElementById('tb-reanchor').addEventListener('click', () => {
+  ANCHOR.set = false;
+  modelGroup.visible = false;
+  setStatus('Re-anchor: inquadra di nuovo un marker', 'searching');
+});
 </script>
 </body>
 </html>
