@@ -61,7 +61,7 @@ button:active { opacity:.8; }
 <body>
 
 <div id="splash">
-  <div class="version">v1.0 — Step F+G: POSIT + Three.js</div>
+  <div class="version">v1.0.1 — Step F: fix pose matrix</div>
   <h1>STEP <span>F</span></h1>
   <p>Un cubo virtuale verrà disegnato sopra il marker. Deve restare ancorato fisicamente al marker mentre muovi il telefono.</p>
   <label>
@@ -2271,48 +2271,67 @@ function syncFOV(focalPixels, imgH) {
 // ─────────────────────────────────────
 // POSIT → Three.js transform
 // ─────────────────────────────────────
-// POSIT reference frame for the marker:
-//   X = right along marker
-//   Y = up along marker (image Y is inverted, so we flip below)
-//   Z = out of marker (toward camera)
-// Translation [tx, ty, tz] is the marker position in CAMERA space (in marker units = metres here).
-// In POSIT's camera convention, Z is FORWARD (positive toward scene).
-// In Three.js convention, camera looks down -Z.
-// So we negate Y and Z to convert POSIT camera → Three.js camera.
+// POSIT output:
+//   bestTranslation = [tx, ty, tz] — marker position in CAMERA frame
+//                                    POSIT camera: X→right, Y→up, Z→forward (into scene)
+//   bestRotation    = 3x3 matrix R such that  p_camera = R · p_marker + T
+//
+// Three.js camera frame: X→right, Y→up, Z→toward viewer (-Z forward)
+//
+// Conversion: invert Y and Z of the camera frame.
+//   v_three = diag(1, -1, -1) · v_posit
+//
+// For the full 4x4 transform from marker to Three.js camera:
+//   M_three = F · M_posit · F⁻¹     where F = diag(1,-1,-1,1)
+// But since we're transforming a point that lives in marker frame and we
+// want it in Three camera frame, we use:
+//   p_three = F · (R · p_marker_local + T)
+//
+// In Three.js terms: object position = F·T, object rotation = F·R·F
+// where F = flip Y and Z. This rewrite uses Three.js primitives directly.
+
 function applyPose(pose) {
-  const R = pose.bestRotation;     // 3x3, rotation of marker in camera frame
-  const T = pose.bestTranslation;  // [tx, ty, tz]
+  const R = pose.bestRotation;
+  const T = pose.bestTranslation;
 
-  // Marker position in Three.js camera space:
-  // POSIT: +X right, +Y up, +Z forward (into scene)
-  // Three: +X right, +Y up, -Z forward
-  // → flip Z (and Y, depending on how POSIT handles image Y inversion).
-  // The standard js-aruco demo flips Y and Z. Let's use the same convention.
-  const px =  T[0];
-  const py = -T[1];
-  const pz = -T[2];
+  // 1) Position: flip Y and Z
+  markerCube.position.set( T[0], -T[1], -T[2] );
 
-  // Rotation matrix → also needs Y/Z axis flips to convert to Three.js convention.
-  // Equivalent to: R_three = diag(1,-1,-1) · R_posit · diag(1,-1,-1)
+  // 2) Rotation: build rotation matrix from POSIT, apply F on both sides.
+  //    F · R · F  means: negate row 1,2 and column 1,2 (= flip Y,Z axes).
+  //    Easier path: build a Three.Matrix4 from POSIT R directly,
+  //    then apply rotation around X by 180° on both sides (which is exactly F).
   const m = new THREE.Matrix4();
+  // THREE.Matrix4 is row-major in .set()
   m.set(
-     R[0][0],  -R[0][1],  -R[0][2],  px,
-    -R[1][0],   R[1][1],   R[1][2],  py,
-    -R[2][0],   R[2][1],   R[2][2],  pz,
-     0,         0,         0,         1
+    R[0][0], R[0][1], R[0][2], 0,
+    R[1][0], R[1][1], R[1][2], 0,
+    R[2][0], R[2][1], R[2][2], 0,
+    0,       0,       0,       1
   );
 
-  markerCube.matrixAutoUpdate = false;
-  markerCube.matrix.copy(m);
+  // F = rotation 180° around X axis. F·R·F flips Y and Z signs in both rows AND columns.
+  const F = new THREE.Matrix4().makeRotationX(Math.PI);
+  // Compute F · R · F  (since F = F⁻¹ for 180° rotation, F·R·F⁻¹ == F·R·F)
+  const mFinal = new THREE.Matrix4().multiplyMatrices(F, m).multiply(F);
 
-  // Lift the cube so it sits ABOVE the marker (its base on the marker plane)
-  // The marker is at origin of its own frame, plane Z=0.
-  // We want cube center at z_marker = +s/2 (above the plane).
-  // So pre-translate the cube geometry up. But since matrix is overridden,
-  // we add the offset directly into the position.
-  const liftLocal = new THREE.Vector3(0, 0, MARKER_SIZE_M/2);
-  liftLocal.applyMatrix4(m); // transform to camera space
-  markerCube.matrix.setPosition(liftLocal);
+  // Extract quaternion and apply
+  const q = new THREE.Quaternion().setFromRotationMatrix(mFinal);
+  markerCube.quaternion.copy(q);
+
+  // Reset to autoUpdate so position+quaternion compose normally
+  markerCube.matrixAutoUpdate = true;
+
+  // Lift cube so its base sits ON the marker plane:
+  // The marker plane in marker-local coords is Z=0. After our flip, the marker plane
+  // normal in Three.js world becomes the local +Y of the cube? Actually no —
+  // the marker frame: X right, Y up (on marker plane), Z out (normal).
+  // After F·R·F, the marker normal in three-space is still the local Z of the cube.
+  // To put the cube ABOVE the marker, translate by half-size along the marker's normal.
+  // We do this by translating in the cube's LOCAL +Z direction (after rotation).
+  const localUp = new THREE.Vector3(0, 0, MARKER_SIZE_M / 2);
+  localUp.applyQuaternion(q);
+  markerCube.position.add(localUp);
 
   markerCube.visible = true;
 }
