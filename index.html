@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Step L1 — Optical Flow</title>
+<title>Step L2 — VIO</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family: Arial, sans-serif; background:#000; color:#fff; overflow:hidden; height:100dvh; width:100vw; }
@@ -11,12 +11,14 @@ body { font-family: Arial, sans-serif; background:#000; color:#fff; overflow:hid
 #splash {
   position:fixed; inset:0; z-index:100; background:#0a0a0f;
   display:flex; flex-direction:column; align-items:center; justify-content:center;
-  gap:1.5rem; padding:2rem; text-align:center;
+  gap:1.4rem; padding:2rem; text-align:center;
 }
 .version { font-size:.65rem; letter-spacing:.12em; opacity:.4; text-transform:uppercase; }
 h1 { font-size:2.4rem; letter-spacing:-.02em; text-transform:uppercase; }
 h1 span { color:#e8410a; }
-#splash p { font-size:.82rem; opacity:.6; max-width:330px; line-height:1.5; }
+#splash p { font-size:.82rem; opacity:.6; max-width:340px; line-height:1.5; }
+#splash label { font-size:.7rem; opacity:.7; display:flex; align-items:center; gap:.5rem; }
+#splash input { width:60px; padding:.3rem; background:#1a1a22; color:#fff; border:1px solid #333; font-family:Arial; font-size:.85rem; text-align:center; }
 button {
   background:#e8410a; color:#fff; border:none;
   padding:.9rem 2.4rem; font-family:Arial,sans-serif; font-size:1rem;
@@ -25,21 +27,32 @@ button {
 }
 button:active { opacity:.8; }
 
+#perm-modal {
+  position:fixed; inset:0; z-index:150; background:rgba(10,10,15,.95);
+  display:none; flex-direction:column; align-items:center; justify-content:center;
+  gap:1.2rem; padding:2rem; text-align:center;
+}
+#perm-modal.show { display:flex; }
+.ico { font-size:2.5rem; }
+
 #cam { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; }
+#c3d { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:2; }
 #overlay { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:3; }
 
 #status {
   position:fixed; top:1rem; left:1rem; right:1rem;
   background:rgba(10,10,15,.78); backdrop-filter:blur(10px);
-  padding:.55rem .85rem; border-left:3px solid #e8410a;
+  padding:.55rem .85rem; border-left:3px solid #f0a500;
   font-size:.7rem; letter-spacing:.06em; text-transform:uppercase;
   pointer-events:none; z-index:10;
 }
+#status.anchored { border-left-color:#1a9e5c; }
+#status.searching { border-left-color:#e8410a; }
 
 #info {
   position:fixed; bottom:1rem; left:1rem; right:1rem;
   background:rgba(10,10,15,.78); backdrop-filter:blur(10px);
-  padding:.65rem .85rem; font-size:.66rem; line-height:1.7;
+  padding:.6rem .85rem; font-size:.62rem; line-height:1.65;
   pointer-events:none; z-index:10; font-family: 'Courier New', monospace;
 }
 .kv { display:flex; justify-content:space-between; gap:1rem; }
@@ -49,238 +62,2301 @@ button:active { opacity:.8; }
   position:fixed; right:1rem;
   background:rgba(10,10,15,.78); backdrop-filter:blur(10px);
   border:1px solid rgba(255,255,255,.15); color:#fff;
-  font-family:Arial; font-size:.62rem; letter-spacing:.06em; text-transform:uppercase;
-  padding:.45rem .75rem; cursor:pointer; z-index:11;
+  font-family:Arial; font-size:.6rem; letter-spacing:.06em; text-transform:uppercase;
+  padding:.4rem .65rem; cursor:pointer; z-index:11;
 }
 .tb.on { border-color:#e8410a; color:#e8410a; }
-#tb-trails { bottom:7.3rem; }
-#tb-reset  { bottom:5.8rem; }
+#tb-of      { bottom:9.5rem; }
+#tb-markers { bottom:8.1rem; }
+#tb-reanchor{ bottom:6.7rem; }
+
+#center-arrow {
+  position:fixed; top:50%; left:50%;
+  transform: translate(-50%, -50%);
+  width:80px; height:80px;
+  pointer-events:none; z-index:8;
+  display:none;
+}
 </style>
 </head>
 <body>
 
 <div id="splash">
-  <div class="version">v1.3 — Step L1: optical flow</div>
-  <h1>STEP <span>L1</span></h1>
-  <p>Test optical flow puro. Vedrai puntini verdi che si attaccano alla scena e si muovono insieme ad essa quando muovi il telefono.</p>
+  <div class="version">v1.4 — Step L2: optical flow + IMU + POSIT</div>
+  <h1>STEP <span>L2</span></h1>
+  <p>Tracking traslazione tramite optical flow + IMU per rotazione + POSIT per ancora. Cammina lentamente e il modello dovrebbe restare fermo.</p>
+  <label>Dim. marker (mm)
+    <input type="number" id="marker-size" value="50" min="10" max="500">
+  </label>
   <button id="btn-start">AVVIA</button>
 </div>
 
+<div id="perm-modal">
+  <div class="ico">📡</div>
+  <p>Autorizza il giroscopio.</p>
+  <button id="btn-gyro">AUTORIZZA</button>
+</div>
+
 <video id="cam" autoplay playsinline muted></video>
+<canvas id="c3d"></canvas>
 <canvas id="overlay"></canvas>
 <canvas id="work" style="display:none"></canvas>
+<canvas id="center-arrow"></canvas>
 
-<button class="tb on" id="tb-trails">TRAIL</button>
-<button class="tb" id="tb-reset">RESET FEAT</button>
+<button class="tb on" id="tb-of">OPTICAL FLOW</button>
+<button class="tb on" id="tb-markers">MARKERS</button>
+<button class="tb" id="tb-reanchor">RE-ANCHOR</button>
 
 <div id="status">In attesa…</div>
 
 <div id="info">
-  <div class="kv"><span>Feature tracciati</span><span id="i-n">0</span></div>
-  <div class="kv"><span>Feature persi</span><span id="i-lost">0</span></div>
-  <div class="kv"><span>Risoluzione OF</span><span id="i-res">—</span></div>
-  <div class="kv"><span>FPS OF</span><span id="i-fps">0</span></div>
-  <div class="kv"><span>Flusso medio</span><span id="i-flow">—</span></div>
+  <div class="kv"><span>Stato</span><span id="i-state">init</span></div>
+  <div class="kv"><span>Feature OF</span><span id="i-of">0</span></div>
+  <div class="kv"><span>Pos camera</span><span id="i-pos">—</span></div>
+  <div class="kv"><span>Trasl.frame</span><span id="i-trans">—</span></div>
+  <div class="kv"><span>Marker</span><span id="i-id">—</span></div>
+  <div class="kv"><span>FPS</span><span id="i-fps">0</span></div>
 </div>
+
+<script>
+// ═══════════════════════════════════════════════
+// ARUCO + POSIT (inline)
+// ═══════════════════════════════════════════════
+/*
+Copyright (c) 2012 Juan Mellado
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
+/*
+References:
+- "Numerical Recipes in C - Second Edition"
+  http://www.nr.com/
+*/
+
+var SVD = SVD || {};
+this.SVD = SVD;
+
+SVD.svdcmp = function(a, m, n, w, v){
+  var flag, i, its, j, jj, k, l, nm,
+      anorm = 0.0, c, f, g = 0.0, h, s, scale = 0.0, x, y, z, rv1 = [];
+      
+  //Householder reduction to bidiagonal form
+  for (i = 0; i < n; ++ i){
+    l = i + 1;
+    rv1[i] = scale * g;
+    g = s = scale = 0.0;
+    if (i < m){
+      for (k = i; k < m; ++ k){
+        scale += Math.abs( a[k][i] );
+      }
+      if (0.0 !== scale){
+        for (k = i; k < m; ++ k){
+          a[k][i] /= scale;
+          s += a[k][i] * a[k][i];
+        }
+        f = a[i][i];
+        g = -SVD.sign( Math.sqrt(s), f );
+        h = f * g - s;
+        a[i][i] = f - g;
+        for (j = l; j < n; ++ j){
+          for (s = 0.0, k = i; k < m; ++ k){
+            s += a[k][i] * a[k][j];
+          }
+          f = s / h;
+          for (k = i; k < m; ++ k){
+            a[k][j] += f * a[k][i];
+          }
+        }
+        for (k = i; k < m; ++ k){
+          a[k][i] *= scale;
+        }
+      }
+    }
+    w[i] = scale * g;
+    g = s = scale = 0.0;
+    if ( (i < m) && (i !== n - 1) ){
+      for (k = l; k < n; ++ k){
+        scale += Math.abs( a[i][k] );
+      }
+      if (0.0 !== scale){
+        for (k = l; k < n; ++ k){
+          a[i][k] /= scale;
+          s += a[i][k] * a[i][k];
+        }
+        f = a[i][l];
+        g = -SVD.sign( Math.sqrt(s), f );
+        h = f * g - s;
+        a[i][l] = f - g;
+        for (k = l; k < n; ++ k){
+          rv1[k] = a[i][k] / h;
+        }
+        for (j = l; j < m; ++ j){
+          for (s = 0.0, k = l; k < n; ++ k){
+            s += a[j][k] * a[i][k];
+          }
+          for (k = l; k < n; ++ k){
+            a[j][k] += s * rv1[k];
+          }
+        }
+        for (k = l; k < n; ++ k){
+          a[i][k] *= scale;
+        }
+      }
+    }
+    anorm = Math.max(anorm, ( Math.abs( w[i] ) + Math.abs( rv1[i] ) ) );
+  }
+
+  //Acumulation of right-hand transformation
+  for (i = n - 1; i >= 0; -- i){
+    if (i < n - 1){
+      if (0.0 !== g){
+        for (j = l; j < n; ++ j){
+          v[j][i] = ( a[i][j] / a[i][l] ) / g;
+        }
+        for (j = l; j < n; ++ j){
+          for (s = 0.0, k = l; k < n; ++ k){
+            s += a[i][k] * v[k][j];
+          }
+          for (k = l; k < n; ++ k){
+            v[k][j] += s * v[k][i];
+          }
+        }
+      }
+      for (j = l; j < n; ++ j){
+        v[i][j] = v[j][i] = 0.0;
+      }
+    }
+    v[i][i] = 1.0;
+    g = rv1[i];
+    l = i;
+  }
+
+  //Acumulation of left-hand transformation
+  for (i = Math.min(n, m) - 1; i >= 0; -- i){
+    l = i + 1;
+    g = w[i];
+    for (j = l; j < n; ++ j){
+      a[i][j] = 0.0;
+    }
+    if (0.0 !== g){
+      g = 1.0 / g;
+      for (j = l; j < n; ++ j){
+        for (s = 0.0, k = l; k < m; ++ k){
+          s += a[k][i] * a[k][j];
+        }
+        f = (s / a[i][i]) * g;
+        for (k = i; k < m; ++ k){
+          a[k][j] += f * a[k][i];
+        }
+      }
+      for (j = i; j < m; ++ j){
+        a[j][i] *= g;
+      }
+    }else{
+        for (j = i; j < m; ++ j){
+          a[j][i] = 0.0;
+        }
+    }
+    ++ a[i][i];
+  }
+
+  //Diagonalization of the bidiagonal form
+  for (k = n - 1; k >= 0; -- k){
+    for (its = 1; its <= 30; ++ its){
+      flag = true;
+      for (l = k; l >= 0; -- l){
+        nm = l - 1;
+        if ( Math.abs( rv1[l] ) + anorm === anorm ){
+          flag = false;
+          break;
+        }
+        if ( Math.abs( w[nm] ) + anorm === anorm ){
+          break;
+        }
+      }
+      if (flag){
+        c = 0.0;
+        s = 1.0;
+        for (i = l; i <= k; ++ i){
+          f = s * rv1[i];
+          if ( Math.abs(f) + anorm === anorm ){
+            break;
+          }
+          g = w[i];
+          h = SVD.pythag(f, g);
+          w[i] = h;
+          h = 1.0 / h;
+          c = g * h;
+          s = -f * h;
+          for (j = 1; j <= m; ++ j){
+            y = a[j][nm];
+            z = a[j][i];
+            a[j][nm] = y * c + z * s;
+            a[j][i] = z * c - y * s;
+          }
+        }
+      }
+
+      //Convergence
+      z = w[k];
+      if (l === k){
+        if (z < 0.0){
+          w[k] = -z;
+          for (j = 0; j < n; ++ j){
+            v[j][k] = -v[j][k];
+          }
+        }
+        break;
+      }
+
+      if (30 === its){
+        return false;
+      }
+
+      //Shift from bottom 2-by-2 minor
+      x = w[l];
+      nm = k - 1;
+      y = w[nm];
+      g = rv1[nm];
+      h = rv1[k];
+      f = ( (y - z) * (y + z) + (g - h) * (g + h) ) / (2.0 * h * y);
+      g = SVD.pythag( f, 1.0 );
+      f = ( (x - z) * (x + z) + h * ( (y / (f + SVD.sign(g, f) ) ) - h) ) / x;
+
+      //Next QR transformation
+      c = s = 1.0;
+      for (j = l; j <= nm; ++ j){
+        i = j + 1;
+        g = rv1[i];
+        y = w[i];
+        h = s * g;
+        g = c * g;
+        z = SVD.pythag(f, h);
+        rv1[j] = z;
+        c = f / z;
+        s = h / z;
+        f = x * c + g * s;
+        g = g * c - x * s;
+        h = y * s;
+        y *= c;
+        for (jj = 0; jj < n; ++ jj){
+          x = v[jj][j];
+          z = v[jj][i];
+          v[jj][j] = x * c + z * s;
+          v[jj][i] = z * c - x * s;
+        }
+        z = SVD.pythag(f, h);
+        w[j] = z;
+        if (0.0 !== z){
+          z = 1.0 / z;
+          c = f * z;
+          s = h * z;
+        }
+        f = c * g + s * y;
+        x = c * y - s * g;
+        for (jj = 0; jj < m; ++ jj){
+          y = a[jj][j];
+          z = a[jj][i];
+          a[jj][j] = y * c + z * s;
+          a[jj][i] = z * c - y * s;
+        }
+      }
+      rv1[l] = 0.0;
+      rv1[k] = f;
+      w[k] = x;
+    }
+  }
+
+  return true;
+};
+
+SVD.pythag = function(a, b){
+  var at = Math.abs(a), bt = Math.abs(b), ct;
+
+  if (at > bt){
+    ct = bt / at;
+    return at * Math.sqrt(1.0 + ct * ct);
+  }
+    
+  if (0.0 === bt){
+    return 0.0;
+  }
+
+  ct = at / bt;
+  return bt * Math.sqrt(1.0 + ct * ct);
+};
+
+SVD.sign = function(a, b){
+  return b >= 0.0? Math.abs(a): -Math.abs(a);
+};
+/*
+Copyright (c) 2011 Juan Mellado
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
+/*
+References:
+- "OpenCV: Open Computer Vision Library"
+  http://sourceforge.net/projects/opencvlibrary/
+- "Stack Blur: Fast But Goodlooking"
+  http://incubator.quasimondo.com/processing/fast_blur_deluxe.php
+*/
+
+var CV = CV || {};
+this.CV = CV;
+
+CV.Image = function(width, height, data){
+  this.width = width || 0;
+  this.height = height || 0;
+  this.data = data || [];
+};
+
+CV.grayscale = function(imageSrc, imageDst){
+  var src = imageSrc.data, dst = imageDst.data, len = src.length,
+      i = 0, j = 0;
+
+  for (; i < len; i += 4){
+    dst[j ++] =
+      (src[i] * 0.299 + src[i + 1] * 0.587 + src[i + 2] * 0.114 + 0.5) & 0xff;
+  }
+
+  imageDst.width = imageSrc.width;
+  imageDst.height = imageSrc.height;
+
+  return imageDst;
+};
+
+CV.threshold = function(imageSrc, imageDst, threshold){
+  var src = imageSrc.data, dst = imageDst.data,
+      len = src.length, tab = [], i;
+
+  for (i = 0; i < 256; ++ i){
+    tab[i] = i <= threshold? 0: 255;
+  }
+
+  for (i = 0; i < len; ++ i){
+    dst[i] = tab[ src[i] ];
+  }
+
+  imageDst.width = imageSrc.width;
+  imageDst.height = imageSrc.height;
+
+  return imageDst;
+};
+
+CV.adaptiveThreshold = function(imageSrc, imageDst, kernelSize, threshold){
+  var src = imageSrc.data, dst = imageDst.data, len = src.length, tab = [], i;
+
+  CV.stackBoxBlur(imageSrc, imageDst, kernelSize);
+
+  for (i = 0; i < 768; ++ i){
+    tab[i] = (i - 255 <= -threshold)? 255: 0;
+  }
+
+  for (i = 0; i < len; ++ i){
+    dst[i] = tab[ src[i] - dst[i] + 255 ];
+  }
+
+  imageDst.width = imageSrc.width;
+  imageDst.height = imageSrc.height;
+
+  return imageDst;
+};
+
+CV.otsu = function(imageSrc){
+  var src = imageSrc.data, len = src.length, hist = [],
+      threshold = 0, sum = 0, sumB = 0, wB = 0, wF = 0, max = 0,
+      mu, between, i;
+
+  for (i = 0; i < 256; ++ i){
+    hist[i] = 0;
+  }
+
+  for (i = 0; i < len; ++ i){
+    hist[ src[i] ] ++;
+  }
+
+  for (i = 0; i < 256; ++ i){
+    sum += hist[i] * i;
+  }
+
+  for (i = 0; i < 256; ++ i){
+    wB += hist[i];
+    if (0 !== wB){
+
+      wF = len - wB;
+      if (0 === wF){
+        break;
+      }
+
+      sumB += hist[i] * i;
+
+      mu = (sumB / wB) - ( (sum - sumB) / wF );
+
+      between = wB * wF * mu * mu;
+
+      if (between > max){
+        max = between;
+        threshold = i;
+      }
+    }
+  }
+
+  return threshold;
+};
+
+CV.stackBoxBlurMult =
+  [1, 171, 205, 293, 57, 373, 79, 137, 241, 27, 391, 357, 41, 19, 283, 265];
+
+CV.stackBoxBlurShift =
+  [0, 9, 10, 11, 9, 12, 10, 11, 12, 9, 13, 13, 10, 9, 13, 13];
+
+CV.BlurStack = function(){
+  this.color = 0;
+  this.next = null;
+};
+
+CV.stackBoxBlur = function(imageSrc, imageDst, kernelSize){
+  var src = imageSrc.data, dst = imageDst.data,
+      height = imageSrc.height, width = imageSrc.width,
+      heightMinus1 = height - 1, widthMinus1 = width - 1,
+      size = kernelSize + kernelSize + 1, radius = kernelSize + 1,
+      mult = CV.stackBoxBlurMult[kernelSize],
+      shift = CV.stackBoxBlurShift[kernelSize],
+      stack, stackStart, color, sum, pos, start, p, x, y, i;
+
+  stack = stackStart = new CV.BlurStack();
+  for (i = 1; i < size; ++ i){
+    stack = stack.next = new CV.BlurStack();
+  }
+  stack.next = stackStart;
+
+  pos = 0;
+
+  for (y = 0; y < height; ++ y){
+    start = pos;
+
+    color = src[pos];
+    sum = radius * color;
+
+    stack = stackStart;
+    for (i = 0; i < radius; ++ i){
+      stack.color = color;
+      stack = stack.next;
+    }
+    for (i = 1; i < radius; ++ i){
+      stack.color = src[pos + i];
+      sum += stack.color;
+      stack = stack.next;
+    }
+
+    stack = stackStart;
+    for (x = 0; x < width; ++ x){
+      dst[pos ++] = (sum * mult) >>> shift;
+
+      p = x + radius;
+      p = start + (p < widthMinus1? p: widthMinus1);
+      sum -= stack.color - src[p];
+
+      stack.color = src[p];
+      stack = stack.next;
+    }
+  }
+
+  for (x = 0; x < width; ++ x){
+    pos = x;
+    start = pos + width;
+
+    color = dst[pos];
+    sum = radius * color;
+
+    stack = stackStart;
+    for (i = 0; i < radius; ++ i){
+      stack.color = color;
+      stack = stack.next;
+    }
+    for (i = 1; i < radius; ++ i){
+      stack.color = dst[start];
+      sum += stack.color;
+      stack = stack.next;
+
+      start += width;
+    }
+
+    stack = stackStart;
+    for (y = 0; y < height; ++ y){
+      dst[pos] = (sum * mult) >>> shift;
+
+      p = y + radius;
+      p = x + ( (p < heightMinus1? p: heightMinus1) * width );
+      sum -= stack.color - dst[p];
+
+      stack.color = dst[p];
+      stack = stack.next;
+
+      pos += width;
+    }
+  }
+
+  return imageDst;
+};
+
+CV.gaussianBlur = function(imageSrc, imageDst, imageMean, kernelSize){
+  var kernel = CV.gaussianKernel(kernelSize);
+
+  imageDst.width = imageSrc.width;
+  imageDst.height = imageSrc.height;
+
+  imageMean.width = imageSrc.width;
+  imageMean.height = imageSrc.height;
+
+  CV.gaussianBlurFilter(imageSrc, imageMean, kernel, true);
+  CV.gaussianBlurFilter(imageMean, imageDst, kernel, false);
+
+  return imageDst;
+};
+
+CV.gaussianBlurFilter = function(imageSrc, imageDst, kernel, horizontal){
+  var src = imageSrc.data, dst = imageDst.data,
+      height = imageSrc.height, width = imageSrc.width,
+      pos = 0, limit = kernel.length >> 1,
+      cur, value, i, j, k;
+
+  for (i = 0; i < height; ++ i){
+
+    for (j = 0; j < width; ++ j){
+      value = 0.0;
+
+      for (k = -limit; k <= limit; ++ k){
+
+        if (horizontal){
+          cur = pos + k;
+          if (j + k < 0){
+            cur = pos;
+          }
+          else if (j + k >= width){
+            cur = pos;
+          }
+        }else{
+          cur = pos + (k * width);
+          if (i + k < 0){
+            cur = pos;
+          }
+          else if (i + k >= height){
+            cur = pos;
+          }
+        }
+
+        value += kernel[limit + k] * src[cur];
+      }
+
+      dst[pos ++] = horizontal? value: (value + 0.5) & 0xff;
+    }
+  }
+
+  return imageDst;
+};
+
+CV.gaussianKernel = function(kernelSize){
+  var tab =
+    [ [1],
+      [0.25, 0.5, 0.25],
+      [0.0625, 0.25, 0.375, 0.25, 0.0625],
+      [0.03125, 0.109375, 0.21875, 0.28125, 0.21875, 0.109375, 0.03125] ],
+    kernel = [], center, sigma, scale2X, sum, x, i;
+
+  if ( (kernelSize <= 7) && (kernelSize % 2 === 1) ){
+    kernel = tab[kernelSize >> 1];
+  }else{
+    center = (kernelSize - 1.0) * 0.5;
+    sigma = 0.8 + (0.3 * (center - 1.0) );
+    scale2X = -0.5 / (sigma * sigma);
+    sum = 0.0;
+    for (i = 0; i < kernelSize; ++ i){
+      x = i - center;
+      sum += kernel[i] = Math.exp(scale2X * x * x);
+    }
+    sum = 1 / sum;
+    for (i = 0; i < kernelSize; ++ i){
+      kernel[i] *= sum;
+    }
+  }
+
+  return kernel;
+};
+
+CV.findContours = function(imageSrc, binary){
+  var width = imageSrc.width, height = imageSrc.height, contours = [],
+      src, deltas, pos, pix, nbd, outer, hole, i, j;
+
+  src = CV.binaryBorder(imageSrc, binary);
+
+  deltas = CV.neighborhoodDeltas(width + 2);
+
+  pos = width + 3;
+  nbd = 1;
+
+  for (i = 0; i < height; ++ i, pos += 2){
+
+    for (j = 0; j < width; ++ j, ++ pos){
+      pix = src[pos];
+
+      if (0 !== pix){
+        outer = hole = false;
+
+        if (1 === pix && 0 === src[pos - 1]){
+          outer = true;
+        }
+        else if (pix >= 1 && 0 === src[pos + 1]){
+          hole = true;
+        }
+
+        if (outer || hole){
+          ++ nbd;
+
+          contours.push( CV.borderFollowing(src, pos, nbd, {x: j, y: i}, hole, deltas) );
+        }
+      }
+    }
+  }
+
+  return contours;
+};
+
+CV.borderFollowing = function(src, pos, nbd, point, hole, deltas){
+  var contour = [], pos1, pos3, pos4, s, s_end, s_prev;
+
+  contour.hole = hole;
+
+  s = s_end = hole? 0: 4;
+  do{
+    s = (s - 1) & 7;
+    pos1 = pos + deltas[s];
+    if (src[pos1] !== 0){
+      break;
+    }
+  }while(s !== s_end);
+
+  if (s === s_end){
+    src[pos] = -nbd;
+    contour.push( {x: point.x, y: point.y} );
+
+  }else{
+    pos3 = pos;
+    s_prev = s ^ 4;
+
+    while(true){
+      s_end = s;
+
+      do{
+        pos4 = pos3 + deltas[++ s];
+      }while(src[pos4] === 0);
+
+      s &= 7;
+
+      if ( ( (s - 1) >>> 0) < (s_end >>> 0) ){
+        src[pos3] = -nbd;
+      }
+      else if (src[pos3] === 1){
+        src[pos3] = nbd;
+      }
+
+      contour.push( {x: point.x, y: point.y} );
+
+      s_prev = s;
+
+      point.x += CV.neighborhood[s][0];
+      point.y += CV.neighborhood[s][1];
+
+      if ( (pos4 === pos) && (pos3 === pos1) ){
+        break;
+      }
+
+      pos3 = pos4;
+      s = (s + 4) & 7;
+    }
+  }
+
+  return contour;
+};
+
+CV.neighborhood =
+  [ [1, 0], [1, -1], [0, -1], [-1, -1], [-1, 0], [-1, 1], [0, 1], [1, 1] ];
+
+CV.neighborhoodDeltas = function(width){
+  var deltas = [], len = CV.neighborhood.length, i = 0;
+
+  for (; i < len; ++ i){
+    deltas[i] = CV.neighborhood[i][0] + (CV.neighborhood[i][1] * width);
+  }
+
+  return deltas.concat(deltas);
+};
+
+CV.approxPolyDP = function(contour, epsilon){
+  var slice = {start_index: 0, end_index: 0},
+      right_slice = {start_index: 0, end_index: 0},
+      poly = [], stack = [], len = contour.length,
+      pt, start_pt, end_pt, dist, max_dist, le_eps,
+      dx, dy, i, j, k;
+
+  epsilon *= epsilon;
+
+  k = 0;
+
+  for (i = 0; i < 3; ++ i){
+    max_dist = 0;
+
+    k = (k + right_slice.start_index) % len;
+    start_pt = contour[k];
+    if (++ k === len) {k = 0;}
+
+    for (j = 1; j < len; ++ j){
+      pt = contour[k];
+      if (++ k === len) {k = 0;}
+
+      dx = pt.x - start_pt.x;
+      dy = pt.y - start_pt.y;
+      dist = dx * dx + dy * dy;
+
+      if (dist > max_dist){
+        max_dist = dist;
+        right_slice.start_index = j;
+      }
+    }
+  }
+
+  if (max_dist <= epsilon){
+    poly.push( {x: start_pt.x, y: start_pt.y} );
+
+  }else{
+    slice.start_index = k;
+    slice.end_index = (right_slice.start_index += slice.start_index);
+
+    right_slice.start_index -= right_slice.start_index >= len? len: 0;
+    right_slice.end_index = slice.start_index;
+    if (right_slice.end_index < right_slice.start_index){
+      right_slice.end_index += len;
+    }
+
+    stack.push( {start_index: right_slice.start_index, end_index: right_slice.end_index} );
+    stack.push( {start_index: slice.start_index, end_index: slice.end_index} );
+  }
+
+  while(stack.length !== 0){
+    slice = stack.pop();
+
+    end_pt = contour[slice.end_index % len];
+    start_pt = contour[k = slice.start_index % len];
+    if (++ k === len) {k = 0;}
+
+    if (slice.end_index <= slice.start_index + 1){
+      le_eps = true;
+
+    }else{
+      max_dist = 0;
+
+      dx = end_pt.x - start_pt.x;
+      dy = end_pt.y - start_pt.y;
+
+      for (i = slice.start_index + 1; i < slice.end_index; ++ i){
+        pt = contour[k];
+        if (++ k === len) {k = 0;}
+
+        dist = Math.abs( (pt.y - start_pt.y) * dx - (pt.x - start_pt.x) * dy);
+
+        if (dist > max_dist){
+          max_dist = dist;
+          right_slice.start_index = i;
+        }
+      }
+
+      le_eps = max_dist * max_dist <= epsilon * (dx * dx + dy * dy);
+    }
+
+    if (le_eps){
+      poly.push( {x: start_pt.x, y: start_pt.y} );
+
+    }else{
+      right_slice.end_index = slice.end_index;
+      slice.end_index = right_slice.start_index;
+
+      stack.push( {start_index: right_slice.start_index, end_index: right_slice.end_index} );
+      stack.push( {start_index: slice.start_index, end_index: slice.end_index} );
+    }
+  }
+
+  return poly;
+};
+
+CV.warp = function(imageSrc, imageDst, contour, warpSize){
+  var src = imageSrc.data, dst = imageDst.data,
+      width = imageSrc.width, height = imageSrc.height,
+      pos = 0,
+      sx1, sx2, dx1, dx2, sy1, sy2, dy1, dy2, p1, p2, p3, p4,
+      m, r, s, t, u, v, w, x, y, i, j;
+
+  m = CV.getPerspectiveTransform(contour, warpSize - 1);
+
+  r = m[8];
+  s = m[2];
+  t = m[5];
+
+  for (i = 0; i < warpSize; ++ i){
+    r += m[7];
+    s += m[1];
+    t += m[4];
+
+    u = r;
+    v = s;
+    w = t;
+
+    for (j = 0; j < warpSize; ++ j){
+      u += m[6];
+      v += m[0];
+      w += m[3];
+
+      x = v / u;
+      y = w / u;
+
+      sx1 = x >>> 0;
+      sx2 = (sx1 === width - 1)? sx1: sx1 + 1;
+      dx1 = x - sx1;
+      dx2 = 1.0 - dx1;
+
+      sy1 = y >>> 0;
+      sy2 = (sy1 === height - 1)? sy1: sy1 + 1;
+      dy1 = y - sy1;
+      dy2 = 1.0 - dy1;
+
+      p1 = p2 = sy1 * width;
+      p3 = p4 = sy2 * width;
+
+      dst[pos ++] =
+        (dy2 * (dx2 * src[p1 + sx1] + dx1 * src[p2 + sx2]) +
+         dy1 * (dx2 * src[p3 + sx1] + dx1 * src[p4 + sx2]) ) & 0xff;
+
+    }
+  }
+
+  imageDst.width = warpSize;
+  imageDst.height = warpSize;
+
+  return imageDst;
+};
+
+CV.getPerspectiveTransform = function(src, size){
+  var rq = CV.square2quad(src);
+
+  rq[0] /= size;
+  rq[1] /= size;
+  rq[3] /= size;
+  rq[4] /= size;
+  rq[6] /= size;
+  rq[7] /= size;
+
+  return rq;
+};
+
+CV.square2quad = function(src){
+  var sq = [], px, py, dx1, dx2, dy1, dy2, den;
+
+  px = src[0].x - src[1].x + src[2].x - src[3].x;
+  py = src[0].y - src[1].y + src[2].y - src[3].y;
+
+  if (0 === px && 0 === py){
+    sq[0] = src[1].x - src[0].x;
+    sq[1] = src[2].x - src[1].x;
+    sq[2] = src[0].x;
+    sq[3] = src[1].y - src[0].y;
+    sq[4] = src[2].y - src[1].y;
+    sq[5] = src[0].y;
+    sq[6] = 0;
+    sq[7] = 0;
+    sq[8] = 1;
+
+  }else{
+    dx1 = src[1].x - src[2].x;
+    dx2 = src[3].x - src[2].x;
+    dy1 = src[1].y - src[2].y;
+    dy2 = src[3].y - src[2].y;
+    den = dx1 * dy2 - dx2 * dy1;
+
+    sq[6] = (px * dy2 - dx2 * py) / den;
+    sq[7] = (dx1 * py - px * dy1) / den;
+    sq[8] = 1;
+    sq[0] = src[1].x - src[0].x + sq[6] * src[1].x;
+    sq[1] = src[3].x - src[0].x + sq[7] * src[3].x;
+    sq[2] = src[0].x;
+    sq[3] = src[1].y - src[0].y + sq[6] * src[1].y;
+    sq[4] = src[3].y - src[0].y + sq[7] * src[3].y;
+    sq[5] = src[0].y;
+  }
+
+  return sq;
+};
+
+CV.isContourConvex = function(contour){
+  var orientation = 0, convex = true,
+      len = contour.length, i = 0, j = 0,
+      cur_pt, prev_pt, dxdy0, dydx0, dx0, dy0, dx, dy;
+
+  prev_pt = contour[len - 1];
+  cur_pt = contour[0];
+
+  dx0 = cur_pt.x - prev_pt.x;
+  dy0 = cur_pt.y - prev_pt.y;
+
+  for (; i < len; ++ i){
+    if (++ j === len) {j = 0;}
+
+    prev_pt = cur_pt;
+    cur_pt = contour[j];
+
+    dx = cur_pt.x - prev_pt.x;
+    dy = cur_pt.y - prev_pt.y;
+    dxdy0 = dx * dy0;
+    dydx0 = dy * dx0;
+
+    orientation |= dydx0 > dxdy0? 1: (dydx0 < dxdy0? 2: 3);
+
+    if (3 === orientation){
+        convex = false;
+        break;
+    }
+
+    dx0 = dx;
+    dy0 = dy;
+  }
+
+  return convex;
+};
+
+CV.perimeter = function(poly){
+  var len = poly.length, i = 0, j = len - 1,
+      p = 0.0, dx, dy;
+
+  for (; i < len; j = i ++){
+    dx = poly[i].x - poly[j].x;
+    dy = poly[i].y - poly[j].y;
+
+    p += Math.sqrt(dx * dx + dy * dy) ;
+  }
+
+  return p;
+};
+
+CV.minEdgeLength = function(poly){
+  var len = poly.length, i = 0, j = len - 1,
+      min = Infinity, d, dx, dy;
+
+  for (; i < len; j = i ++){
+    dx = poly[i].x - poly[j].x;
+    dy = poly[i].y - poly[j].y;
+
+    d = dx * dx + dy * dy;
+
+    if (d < min){
+      min = d;
+    }
+  }
+
+  return Math.sqrt(min);
+};
+
+CV.countNonZero = function(imageSrc, square){
+  var src = imageSrc.data, height = square.height, width = square.width,
+      pos = square.x + (square.y * imageSrc.width),
+      span = imageSrc.width - width,
+      nz = 0, i, j;
+
+  for (i = 0; i < height; ++ i){
+
+    for (j = 0; j < width; ++ j){
+
+      if ( 0 !== src[pos ++] ){
+        ++ nz;
+      }
+    }
+
+    pos += span;
+  }
+
+  return nz;
+};
+
+CV.binaryBorder = function(imageSrc, dst){
+  var src = imageSrc.data, height = imageSrc.height, width = imageSrc.width,
+      posSrc = 0, posDst = 0, i, j;
+
+  for (j = -2; j < width; ++ j){
+    dst[posDst ++] = 0;
+  }
+
+  for (i = 0; i < height; ++ i){
+    dst[posDst ++] = 0;
+
+    for (j = 0; j < width; ++ j){
+      dst[posDst ++] = (0 === src[posSrc ++]? 0: 1);
+    }
+
+    dst[posDst ++] = 0;
+  }
+
+  for (j = -2; j < width; ++ j){
+    dst[posDst ++] = 0;
+  }
+
+  return dst;
+};
+/*
+Copyright (c) 2020 Damiano Falcioni
+Copyright (c) 2011 Juan Mellado
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
+/*
+References:
+- "ArUco: a minimal library for Augmented Reality applications based on OpenCv"
+  http://www.uco.es/investiga/grupos/ava/node/26
+- "js-aruco: a port to JavaScript of the ArUco library"
+  https://github.com/jcmellado/js-aruco
+*/
+
+var AR = {};
+var CV = this.CV || require('./cv').CV;
+this.AR = AR;
+
+AR.DICTIONARIES = {
+  ARUCO: {
+    nBits: 25,
+    tau: 3,
+    codeList: [0x1084210,0x1084217,0x1084209,0x108420e,0x10842f0,0x10842f7,0x10842e9,0x10842ee,0x1084130,0x1084137,0x1084129,0x108412e,0x10841d0,0x10841d7,0x10841c9,0x10841ce,0x1085e10,0x1085e17,0x1085e09,0x1085e0e,0x1085ef0,0x1085ef7,0x1085ee9,0x1085eee,0x1085d30,0x1085d37,0x1085d29,0x1085d2e,0x1085dd0,0x1085dd7,0x1085dc9,0x1085dce,0x1082610,0x1082617,0x1082609,0x108260e,0x10826f0,0x10826f7,0x10826e9,0x10826ee,0x1082530,0x1082537,0x1082529,0x108252e,0x10825d0,0x10825d7,0x10825c9,0x10825ce,0x1083a10,0x1083a17,0x1083a09,0x1083a0e,0x1083af0,0x1083af7,0x1083ae9,0x1083aee,0x1083930,0x1083937,0x1083929,0x108392e,0x10839d0,0x10839d7,0x10839c9,0x10839ce,0x10bc210,0x10bc217,0x10bc209,0x10bc20e,0x10bc2f0,0x10bc2f7,0x10bc2e9,0x10bc2ee,0x10bc130,0x10bc137,0x10bc129,0x10bc12e,0x10bc1d0,0x10bc1d7,0x10bc1c9,0x10bc1ce,0x10bde10,0x10bde17,0x10bde09,0x10bde0e,0x10bdef0,0x10bdef7,0x10bdee9,0x10bdeee,0x10bdd30,0x10bdd37,0x10bdd29,0x10bdd2e,0x10bddd0,0x10bddd7,0x10bddc9,0x10bddce,0x10ba610,0x10ba617,0x10ba609,0x10ba60e,0x10ba6f0,0x10ba6f7,0x10ba6e9,0x10ba6ee,0x10ba530,0x10ba537,0x10ba529,0x10ba52e,0x10ba5d0,0x10ba5d7,0x10ba5c9,0x10ba5ce,0x10bba10,0x10bba17,0x10bba09,0x10bba0e,0x10bbaf0,0x10bbaf7,0x10bbae9,0x10bbaee,0x10bb930,0x10bb937,0x10bb929,0x10bb92e,0x10bb9d0,0x10bb9d7,0x10bb9c9,0x10bb9ce,0x104c210,0x104c217,0x104c209,0x104c20e,0x104c2f0,0x104c2f7,0x104c2e9,0x104c2ee,0x104c130,0x104c137,0x104c129,0x104c12e,0x104c1d0,0x104c1d7,0x104c1c9,0x104c1ce,0x104de10,0x104de17,0x104de09,0x104de0e,0x104def0,0x104def7,0x104dee9,0x104deee,0x104dd30,0x104dd37,0x104dd29,0x104dd2e,0x104ddd0,0x104ddd7,0x104ddc9,0x104ddce,0x104a610,0x104a617,0x104a609,0x104a60e,0x104a6f0,0x104a6f7,0x104a6e9,0x104a6ee,0x104a530,0x104a537,0x104a529,0x104a52e,0x104a5d0,0x104a5d7,0x104a5c9,0x104a5ce,0x104ba10,0x104ba17,0x104ba09,0x104ba0e,0x104baf0,0x104baf7,0x104bae9,0x104baee,0x104b930,0x104b937,0x104b929,0x104b92e,0x104b9d0,0x104b9d7,0x104b9c9,0x104b9ce,0x1074210,0x1074217,0x1074209,0x107420e,0x10742f0,0x10742f7,0x10742e9,0x10742ee,0x1074130,0x1074137,0x1074129,0x107412e,0x10741d0,0x10741d7,0x10741c9,0x10741ce,0x1075e10,0x1075e17,0x1075e09,0x1075e0e,0x1075ef0,0x1075ef7,0x1075ee9,0x1075eee,0x1075d30,0x1075d37,0x1075d29,0x1075d2e,0x1075dd0,0x1075dd7,0x1075dc9,0x1075dce,0x1072610,0x1072617,0x1072609,0x107260e,0x10726f0,0x10726f7,0x10726e9,0x10726ee,0x1072530,0x1072537,0x1072529,0x107252e,0x10725d0,0x10725d7,0x10725c9,0x10725ce,0x1073a10,0x1073a17,0x1073a09,0x1073a0e,0x1073af0,0x1073af7,0x1073ae9,0x1073aee,0x1073930,0x1073937,0x1073929,0x107392e,0x10739d0,0x10739d7,0x10739c9,0x10739ce,0x1784210,0x1784217,0x1784209,0x178420e,0x17842f0,0x17842f7,0x17842e9,0x17842ee,0x1784130,0x1784137,0x1784129,0x178412e,0x17841d0,0x17841d7,0x17841c9,0x17841ce,0x1785e10,0x1785e17,0x1785e09,0x1785e0e,0x1785ef0,0x1785ef7,0x1785ee9,0x1785eee,0x1785d30,0x1785d37,0x1785d29,0x1785d2e,0x1785dd0,0x1785dd7,0x1785dc9,0x1785dce,0x1782610,0x1782617,0x1782609,0x178260e,0x17826f0,0x17826f7,0x17826e9,0x17826ee,0x1782530,0x1782537,0x1782529,0x178252e,0x17825d0,0x17825d7,0x17825c9,0x17825ce,0x1783a10,0x1783a17,0x1783a09,0x1783a0e,0x1783af0,0x1783af7,0x1783ae9,0x1783aee,0x1783930,0x1783937,0x1783929,0x178392e,0x17839d0,0x17839d7,0x17839c9,0x17839ce,0x17bc210,0x17bc217,0x17bc209,0x17bc20e,0x17bc2f0,0x17bc2f7,0x17bc2e9,0x17bc2ee,0x17bc130,0x17bc137,0x17bc129,0x17bc12e,0x17bc1d0,0x17bc1d7,0x17bc1c9,0x17bc1ce,0x17bde10,0x17bde17,0x17bde09,0x17bde0e,0x17bdef0,0x17bdef7,0x17bdee9,0x17bdeee,0x17bdd30,0x17bdd37,0x17bdd29,0x17bdd2e,0x17bddd0,0x17bddd7,0x17bddc9,0x17bddce,0x17ba610,0x17ba617,0x17ba609,0x17ba60e,0x17ba6f0,0x17ba6f7,0x17ba6e9,0x17ba6ee,0x17ba530,0x17ba537,0x17ba529,0x17ba52e,0x17ba5d0,0x17ba5d7,0x17ba5c9,0x17ba5ce,0x17bba10,0x17bba17,0x17bba09,0x17bba0e,0x17bbaf0,0x17bbaf7,0x17bbae9,0x17bbaee,0x17bb930,0x17bb937,0x17bb929,0x17bb92e,0x17bb9d0,0x17bb9d7,0x17bb9c9,0x17bb9ce,0x174c210,0x174c217,0x174c209,0x174c20e,0x174c2f0,0x174c2f7,0x174c2e9,0x174c2ee,0x174c130,0x174c137,0x174c129,0x174c12e,0x174c1d0,0x174c1d7,0x174c1c9,0x174c1ce,0x174de10,0x174de17,0x174de09,0x174de0e,0x174def0,0x174def7,0x174dee9,0x174deee,0x174dd30,0x174dd37,0x174dd29,0x174dd2e,0x174ddd0,0x174ddd7,0x174ddc9,0x174ddce,0x174a610,0x174a617,0x174a609,0x174a60e,0x174a6f0,0x174a6f7,0x174a6e9,0x174a6ee,0x174a530,0x174a537,0x174a529,0x174a52e,0x174a5d0,0x174a5d7,0x174a5c9,0x174a5ce,0x174ba10,0x174ba17,0x174ba09,0x174ba0e,0x174baf0,0x174baf7,0x174bae9,0x174baee,0x174b930,0x174b937,0x174b929,0x174b92e,0x174b9d0,0x174b9d7,0x174b9c9,0x174b9ce,0x1774210,0x1774217,0x1774209,0x177420e,0x17742f0,0x17742f7,0x17742e9,0x17742ee,0x1774130,0x1774137,0x1774129,0x177412e,0x17741d0,0x17741d7,0x17741c9,0x17741ce,0x1775e10,0x1775e17,0x1775e09,0x1775e0e,0x1775ef0,0x1775ef7,0x1775ee9,0x1775eee,0x1775d30,0x1775d37,0x1775d29,0x1775d2e,0x1775dd0,0x1775dd7,0x1775dc9,0x1775dce,0x1772610,0x1772617,0x1772609,0x177260e,0x17726f0,0x17726f7,0x17726e9,0x17726ee,0x1772530,0x1772537,0x1772529,0x177252e,0x17725d0,0x17725d7,0x17725c9,0x17725ce,0x1773a10,0x1773a17,0x1773a09,0x1773a0e,0x1773af0,0x1773af7,0x1773ae9,0x1773aee,0x1773930,0x1773937,0x1773929,0x177392e,0x17739d0,0x17739d7,0x17739c9,0x17739ce,0x984210,0x984217,0x984209,0x98420e,0x9842f0,0x9842f7,0x9842e9,0x9842ee,0x984130,0x984137,0x984129,0x98412e,0x9841d0,0x9841d7,0x9841c9,0x9841ce,0x985e10,0x985e17,0x985e09,0x985e0e,0x985ef0,0x985ef7,0x985ee9,0x985eee,0x985d30,0x985d37,0x985d29,0x985d2e,0x985dd0,0x985dd7,0x985dc9,0x985dce,0x982610,0x982617,0x982609,0x98260e,0x9826f0,0x9826f7,0x9826e9,0x9826ee,0x982530,0x982537,0x982529,0x98252e,0x9825d0,0x9825d7,0x9825c9,0x9825ce,0x983a10,0x983a17,0x983a09,0x983a0e,0x983af0,0x983af7,0x983ae9,0x983aee,0x983930,0x983937,0x983929,0x98392e,0x9839d0,0x9839d7,0x9839c9,0x9839ce,0x9bc210,0x9bc217,0x9bc209,0x9bc20e,0x9bc2f0,0x9bc2f7,0x9bc2e9,0x9bc2ee,0x9bc130,0x9bc137,0x9bc129,0x9bc12e,0x9bc1d0,0x9bc1d7,0x9bc1c9,0x9bc1ce,0x9bde10,0x9bde17,0x9bde09,0x9bde0e,0x9bdef0,0x9bdef7,0x9bdee9,0x9bdeee,0x9bdd30,0x9bdd37,0x9bdd29,0x9bdd2e,0x9bddd0,0x9bddd7,0x9bddc9,0x9bddce,0x9ba610,0x9ba617,0x9ba609,0x9ba60e,0x9ba6f0,0x9ba6f7,0x9ba6e9,0x9ba6ee,0x9ba530,0x9ba537,0x9ba529,0x9ba52e,0x9ba5d0,0x9ba5d7,0x9ba5c9,0x9ba5ce,0x9bba10,0x9bba17,0x9bba09,0x9bba0e,0x9bbaf0,0x9bbaf7,0x9bbae9,0x9bbaee,0x9bb930,0x9bb937,0x9bb929,0x9bb92e,0x9bb9d0,0x9bb9d7,0x9bb9c9,0x9bb9ce,0x94c210,0x94c217,0x94c209,0x94c20e,0x94c2f0,0x94c2f7,0x94c2e9,0x94c2ee,0x94c130,0x94c137,0x94c129,0x94c12e,0x94c1d0,0x94c1d7,0x94c1c9,0x94c1ce,0x94de10,0x94de17,0x94de09,0x94de0e,0x94def0,0x94def7,0x94dee9,0x94deee,0x94dd30,0x94dd37,0x94dd29,0x94dd2e,0x94ddd0,0x94ddd7,0x94ddc9,0x94ddce,0x94a610,0x94a617,0x94a609,0x94a60e,0x94a6f0,0x94a6f7,0x94a6e9,0x94a6ee,0x94a530,0x94a537,0x94a529,0x94a52e,0x94a5d0,0x94a5d7,0x94a5c9,0x94a5ce,0x94ba10,0x94ba17,0x94ba09,0x94ba0e,0x94baf0,0x94baf7,0x94bae9,0x94baee,0x94b930,0x94b937,0x94b929,0x94b92e,0x94b9d0,0x94b9d7,0x94b9c9,0x94b9ce,0x974210,0x974217,0x974209,0x97420e,0x9742f0,0x9742f7,0x9742e9,0x9742ee,0x974130,0x974137,0x974129,0x97412e,0x9741d0,0x9741d7,0x9741c9,0x9741ce,0x975e10,0x975e17,0x975e09,0x975e0e,0x975ef0,0x975ef7,0x975ee9,0x975eee,0x975d30,0x975d37,0x975d29,0x975d2e,0x975dd0,0x975dd7,0x975dc9,0x975dce,0x972610,0x972617,0x972609,0x97260e,0x9726f0,0x9726f7,0x9726e9,0x9726ee,0x972530,0x972537,0x972529,0x97252e,0x9725d0,0x9725d7,0x9725c9,0x9725ce,0x973a10,0x973a17,0x973a09,0x973a0e,0x973af0,0x973af7,0x973ae9,0x973aee,0x973930,0x973937,0x973929,0x97392e,0x9739d0,0x9739d7,0x9739c9,0x9739ce,0xe84210,0xe84217,0xe84209,0xe8420e,0xe842f0,0xe842f7,0xe842e9,0xe842ee,0xe84130,0xe84137,0xe84129,0xe8412e,0xe841d0,0xe841d7,0xe841c9,0xe841ce,0xe85e10,0xe85e17,0xe85e09,0xe85e0e,0xe85ef0,0xe85ef7,0xe85ee9,0xe85eee,0xe85d30,0xe85d37,0xe85d29,0xe85d2e,0xe85dd0,0xe85dd7,0xe85dc9,0xe85dce,0xe82610,0xe82617,0xe82609,0xe8260e,0xe826f0,0xe826f7,0xe826e9,0xe826ee,0xe82530,0xe82537,0xe82529,0xe8252e,0xe825d0,0xe825d7,0xe825c9,0xe825ce,0xe83a10,0xe83a17,0xe83a09,0xe83a0e,0xe83af0,0xe83af7,0xe83ae9,0xe83aee,0xe83930,0xe83937,0xe83929,0xe8392e,0xe839d0,0xe839d7,0xe839c9,0xe839ce,0xebc210,0xebc217,0xebc209,0xebc20e,0xebc2f0,0xebc2f7,0xebc2e9,0xebc2ee,0xebc130,0xebc137,0xebc129,0xebc12e,0xebc1d0,0xebc1d7,0xebc1c9,0xebc1ce,0xebde10,0xebde17,0xebde09,0xebde0e,0xebdef0,0xebdef7,0xebdee9,0xebdeee,0xebdd30,0xebdd37,0xebdd29,0xebdd2e,0xebddd0,0xebddd7,0xebddc9,0xebddce,0xeba610,0xeba617,0xeba609,0xeba60e,0xeba6f0,0xeba6f7,0xeba6e9,0xeba6ee,0xeba530,0xeba537,0xeba529,0xeba52e,0xeba5d0,0xeba5d7,0xeba5c9,0xeba5ce,0xebba10,0xebba17,0xebba09,0xebba0e,0xebbaf0,0xebbaf7,0xebbae9,0xebbaee,0xebb930,0xebb937,0xebb929,0xebb92e,0xebb9d0,0xebb9d7,0xebb9c9,0xebb9ce,0xe4c210,0xe4c217,0xe4c209,0xe4c20e,0xe4c2f0,0xe4c2f7,0xe4c2e9,0xe4c2ee,0xe4c130,0xe4c137,0xe4c129,0xe4c12e,0xe4c1d0,0xe4c1d7,0xe4c1c9,0xe4c1ce,0xe4de10,0xe4de17,0xe4de09,0xe4de0e,0xe4def0,0xe4def7,0xe4dee9,0xe4deee,0xe4dd30,0xe4dd37,0xe4dd29,0xe4dd2e,0xe4ddd0,0xe4ddd7,0xe4ddc9,0xe4ddce,0xe4a610,0xe4a617,0xe4a609,0xe4a60e,0xe4a6f0,0xe4a6f7,0xe4a6e9,0xe4a6ee,0xe4a530,0xe4a537,0xe4a529,0xe4a52e,0xe4a5d0,0xe4a5d7,0xe4a5c9,0xe4a5ce,0xe4ba10,0xe4ba17,0xe4ba09,0xe4ba0e,0xe4baf0,0xe4baf7,0xe4bae9,0xe4baee,0xe4b930,0xe4b937,0xe4b929,0xe4b92e,0xe4b9d0,0xe4b9d7,0xe4b9c9,0xe4b9ce,0xe74210,0xe74217,0xe74209,0xe7420e,0xe742f0,0xe742f7,0xe742e9,0xe742ee,0xe74130,0xe74137,0xe74129,0xe7412e,0xe741d0,0xe741d7,0xe741c9,0xe741ce,0xe75e10,0xe75e17,0xe75e09,0xe75e0e,0xe75ef0,0xe75ef7,0xe75ee9,0xe75eee,0xe75d30,0xe75d37,0xe75d29,0xe75d2e,0xe75dd0,0xe75dd7,0xe75dc9,0xe75dce,0xe72610,0xe72617,0xe72609,0xe7260e,0xe726f0,0xe726f7,0xe726e9,0xe726ee,0xe72530,0xe72537,0xe72529,0xe7252e,0xe725d0,0xe725d7,0xe725c9,0xe725ce,0xe73a10,0xe73a17,0xe73a09,0xe73a0e,0xe73af0,0xe73af7,0xe73ae9,0xe73aee,0xe73930,0xe73937,0xe73929,0xe7392e,0xe739d0,0xe739d7,0xe739c9]
+  },
+  ARUCO_MIP_36h12: {
+    nBits: 36,
+    tau: 12,
+    codeList: [0xd2b63a09d,0x6001134e5,0x1206fbe72,0xff8ad6cb4,0x85da9bc49,0xb461afe9c,0x6db51fe13,0x5248c541f,0x8f34503,0x8ea462ece,0xeac2be76d,0x1af615c44,0xb48a49f27,0x2e4e1283b,0x78b1f2fa8,0x27d34f57e,0x89222fff1,0x4c1669406,0xbf49b3511,0xdc191cd5d,0x11d7c3f85,0x16a130e35,0xe29f27eff,0x428d8ae0c,0x90d548477,0x2319cbc93,0xc3b0c3dfc,0x424bccc9,0x2a081d630,0x762743d96,0xd0645bf19,0xf38d7fd60,0xc6cbf9a10,0x3c1be7c65,0x276f75e63,0x4490a3f63,0xda60acd52,0x3cc68df59,0xab46f9dae,0x88d533d78,0xb6d62ec21,0xb3c02b646,0x22e56d408,0xac5f5770a,0xaaa993f66,0x4caa07c8d,0x5c9b4f7b0,0xaa9ef0e05,0x705c5750,0xac81f545e,0x735b91e74,0x8cc35cee4,0xe44694d04,0xb5e121de0,0x261017d0f,0xf1d439eb5,0xa1a33ac96,0x174c62c02,0x1ee27f716,0x8b1c5ece9,0x6a05b0c6a,0xd0568dfc,0x192d25e5f,0x1adbeccc8,0xcfec87f00,0xd0b9dde7a,0x88dcef81e,0x445681cb9,0xdbb2ffc83,0xa48d96df1,0xb72cc2e7d,0xc295b53f,0xf49832704,0x9968edc29,0x9e4e1af85,0x8683e2d1b,0x810b45c04,0x6ac44bfe2,0x645346615,0x3990bd598,0x1c9ed0f6a,0xc26729d65,0x83993f795,0x3ac05ac5d,0x357adff3b,0xd5c05565,0x2f547ef44,0x86c115041,0x640fd9e5f,0xce08bbcf7,0x109bb343e,0xc21435c92,0x35b4dfce4,0x459752cf2,0xec915b82c,0x51881eed0,0x2dda7dc97,0x2e0142144,0x42e890f99,0x9a8856527,0x8e80d9d80,0x891cbcf34,0x25dd82410,0x239551d34,0x8fe8f0c70,0x94106a970,0x82609b40c,0xfc9caf36,0x688181d11,0x718613c08,0xf1ab7629,0xa357bfc18,0x4c03b7a46,0x204dedce6,0xad6300d37,0x84cc4cd09,0x42160e5c4,0x87d2adfa8,0x7850e7749,0x4e750fc7c,0xbf2e5dfda,0xd88324da5,0x234b52f80,0x378204514,0xabdf2ad53,0x365e78ef9,0x49caa6ca2,0x3c39ddf3,0xc68c5385d,0x5bfcbbf67,0x623241e21,0xabc90d5cc,0x388c6fe85,0xda0e2d62d,0x10855dfe9,0x4d46efd6b,0x76ea12d61,0x9db377d3d,0xeed0efa71,0xe6ec3ae2f,0x441faee83,0xba19c8ff5,0x313035eab,0x6ce8f7625,0x880dab58d,0x8d3409e0d,0x2be92ee21,0xd60302c6c,0x469ffc724,0x87eebeed3,0x42587ef7a,0x7a8cc4e52,0x76a437650,0x999e41ef4,0x7d0969e42,0xc02baf46b,0x9259f3e47,0x2116a1dc0,0x9f2de4d84,0xeffac29,0x7b371ff8c,0x668339da9,0xd010aee3f,0x1cd00b4c0,0x95070fc3b,0xf84c9a770,0x38f863d76,0x3646ff045,0xce1b96412,0x7a5d45da8,0x14e00ef6c,0x5e95abfd8,0xb2e9cb729,0x36c47dd7,0xb8ee97c6b,0xe9e8f657,0xd4ad2ef1a,0x8811c7f32,0x47bde7c31,0x3adadfb64,0x6e5b28574,0x33e67cd91,0x2ab9fdd2d,0x8afa67f2b,0xe6a28fc5e,0x72049cdbd,0xae65dac12,0x1251a4526,0x1089ab841,0xe2f096ee0,0xb0caee573,0xfd6677e86,0x444b3f518,0xbe8b3a56a,0x680a75cfc,0xac02baea8,0x97d815e1c,0x1d4386e08,0x1a14f5b0e,0xe658a8d81,0xa3868efa7,0x3668a9673,0xe8fc53d85,0x2e2b7edd5,0x8b2470f13,0xf69795f32,0x4589ffc8e,0x2e2080c9c,0x64265f7d,0x3d714dd10,0x1692c6ef1,0x3e67f2f49,0x5041dad63,0x1a1503415,0x64c18c742,0xa72eec35,0x1f0f9dc60,0xa9559bc67,0xf32911d0d,0x21c0d4ffc,0xe01cef5b0,0x4e23a3520,0xaa4f04e49,0xe1c4fcc43,0x208e8f6e8,0x8486774a5,0x9e98c7558,0x2c59fb7dc,0x9446a4613,0x8292dcc2e,0x4d61631,0xd05527809,0xa0163852d,0x8f657f639,0xcca6c3e37,0xcb136bc7a,0xfc5a83e53,0x9aa44fc30,0xbdec1bd3c,0xe020b9f7c,0x4b8f35fb0,0xb8165f637,0x33dc88d69,0x10a2f7e4d,0xc8cb5ff53,0xde259ff6b,0x46d070dd4,0x32d3b9741,0x7075f1c04,0x4d58dbea0]
+  }
+};
+
+AR.Dictionary = function (dicName) {
+  this.codes = {};
+  this.codeList = [];
+  this.tau = 0;
+  this._initialize(dicName);
+};
+
+AR.Dictionary.prototype._initialize = function (dicName) {
+  this.codes = {};
+  this.codeList = [];
+  this.tau = 0;
+  this.nBits = 0;
+  this.markSize = 0;
+  this.dicName = dicName;
+  var dictionary = AR.DICTIONARIES[dicName];
+  if (!dictionary)
+    throw 'The dictionary "' + dicName + '" is not recognized.';
+  
+  this.nBits = dictionary.nBits;
+  this.markSize = Math.sqrt(dictionary.nBits) + 2;
+  for (var i = 0; i < dictionary.codeList.length; i++) {
+    var code = null;
+    if (typeof dictionary.codeList[i] === 'number')
+      code = this._hex2bin(dictionary.codeList[i], dictionary.nBits);
+    if (typeof dictionary.codeList[i] === 'string')
+      code = this._hex2bin(parseInt(dictionary.codeList[i], 16), dictionary.nBits);
+    if (Array.isArray(dictionary.codeList[i])) 
+      code = this._bytes2bin(dictionary.codeList[i], dictionary.nBits);
+    if (code === null) 
+      throw 'Invalid code ' + i + ' in dictionary ' + dicName + ': ' + JSON.stringify(dictionary.codeList[i]);
+    if (code.length != dictionary.nBits)
+      throw 'The code ' + i + ' in dictionary ' + dicName + ' is not ' +  dictionary.nBits + ' bits long but ' + code.length + ': ' + code;
+    this.codeList.push(code);
+    this.codes[code] = {
+      id: i
+    };
+  }
+  this.tau = dictionary.tau || this._calculateTau();
+};
+
+AR.Dictionary.prototype.find = function (bits) {
+  var val = '',
+    i, j;
+  for (i = 0; i < bits.length; i++) {
+    var bitRow = bits[i];
+    for (j = 0; j < bitRow.length; j++) {
+      val += bitRow[j];
+    }
+  }
+  var minFound = this.codes[val];
+  if (minFound)
+    return {
+      id: minFound.id,
+      distance: 0
+    };
+
+  for (i = 0; i < this.codeList.length; i++) {
+    var code = this.codeList[i];
+    var distance = this._hammingDistance(val, code);
+    if (this._hammingDistance(val, code) < this.tau) {
+      if (!minFound || minFound.distance > distance) {
+        minFound = {
+          id: this.codes[code].id,
+          distance: distance
+        };
+      }
+    }
+  }
+  return minFound;
+};
+
+AR.Dictionary.prototype._hex2bin = function (hex, nBits) {
+  return hex.toString(2).padStart(nBits, '0');
+};
+
+AR.Dictionary.prototype._bytes2bin = function (byteList, nBits) {
+  var bits = '', byte;
+  for (byte of byteList) {
+    bits += byte.toString(2).padStart(bits.length + 8 > nBits?nBits - bits.length:8, '0');
+  }
+  return bits;
+};
+
+AR.Dictionary.prototype._hammingDistance = function (str1, str2) {
+  if (str1.length != str2.length)
+    throw 'Hamming distance calculation require inputs of the same length';
+  var distance = 0,
+    i;
+  for (i = 0; i < str1.length; i++)
+    if (str1[i] !== str2[i])
+      distance += 1;
+  return distance;
+};
+
+AR.Dictionary.prototype._calculateTau = function () {
+  var tau = Number.MAX_VALUE;
+  for(var i=0;i<this.codeList.length;i++)
+    for(var j=i+1;j<this.codeList.length;j++) {
+      var distance = this._hammingDistance(this.codeList[i], this.codeList[j]);
+      tau = distance < tau ? distance : tau;
+    }
+  return tau;
+};
+
+AR.Dictionary.prototype.generateSVG = function (id) {
+  var code = this.codeList[id];
+  if (code == null)
+    throw 'The id "' + id + '" is not valid for the dictionary "' + this.dicName + '". ID must be between 0 and ' + (this.codeList.length-1) + ' included.';
+  var size = this.markSize - 2;
+  var svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+ (size+4) + ' ' + (size+4) + '">';
+  svg += '<rect x="0" y="0" width="' + (size+4) + '" height="' + (size+4) + '" fill="white"/>';
+  svg += '<rect x="1" y="1" width="' + (size+2) + '" height="' + (size+2) + '" fill="black"/>';
+  for(var y=0;y<size;y++) {
+    for(var x=0;x<size;x++) {
+      if (code[y*size+x]=='1') 
+        svg += '<rect x="' + (x+2) + '" y="' + (y+2) + '" width="1" height="1" fill="white"/>';
+    }
+  }
+  svg += '</svg>';
+  return svg;
+};
+
+AR.Marker = function (id, corners, hammingDistance) {
+  this.id = id;
+  this.corners = corners;
+  this.hammingDistance = hammingDistance;
+};
+
+AR.Detector = function (config) {
+  config = config || {};
+  this.grey = new CV.Image();
+  this.thres = new CV.Image();
+  this.homography = new CV.Image();
+  this.binary = [];
+  this.contours = [];
+  this.polys = [];
+  this.candidates = [];
+  config.dictionaryName = config.dictionaryName || 'ARUCO_MIP_36h12';
+  this.dictionary = new AR.Dictionary(config.dictionaryName);
+  this.dictionary.tau = config.maxHammingDistance != null ? config.maxHammingDistance : this.dictionary.tau;
+};
+
+AR.Detector.prototype.detectImage = function (width, height, data) {
+  return this.detect({
+    width: width,
+    height: height,
+    data: data
+  });
+};
+
+AR.Detector.prototype.detectStreamInit = function (width, height, callback) {
+  this.streamConfig = {};
+  this.streamConfig.width = width;
+  this.streamConfig.height = height;
+  this.streamConfig.imageSize = width * height * 4; //provided image must be a sequence of rgba bytes (4 bytes represent a pixel)
+  this.streamConfig.index = 0;
+  this.streamConfig.imageData = new Uint8ClampedArray(this.streamConfig.imageSize);
+  this.streamConfig.callback = callback || function (image, markerList) {};
+};
+
+//accept data chunks of different sizes
+AR.Detector.prototype.detectStream = function (data) {
+  for (var i = 0; i < data.length; i++) {
+    this.streamConfig.imageData[this.streamConfig.index] = data[i];
+    this.streamConfig.index = (this.streamConfig.index + 1) % this.streamConfig.imageSize;
+    if (this.streamConfig.index == 0) {
+      var image = {
+        width: this.streamConfig.width,
+        height: this.streamConfig.height,
+        data: this.streamConfig.imageData
+      };
+      var markerList = this.detect(image);
+      this.streamConfig.callback(image, markerList);
+    }
+  }
+};
+
+AR.Detector.prototype.detectMJPEGStreamInit = function (width, height, callback, decoderFn) {
+  this.mjpeg = {
+    decoderFn: decoderFn,
+    chunks: [],
+    SOI: [0xff, 0xd8],
+    EOI: [0xff, 0xd9]
+  };
+  this.detectStreamInit(width, height, callback);
+};
+
+AR.Detector.prototype.detectMJPEGStream = function (chunk) {
+  var eoiPos = chunk.findIndex(function (element, index, array) {
+    return this.mjpeg.EOI[0] == element && array.length > index + 1 && this.mjpeg.EOI[1] == array[index + 1];
+  });
+  var soiPos = chunk.findIndex(function (element, index, array) {
+    return this.mjpeg.SOI[0] == element && array.length > index + 1 && this.mjpeg.SOI[1] == array[index + 1];
+  });
+
+  if (eoiPos === -1) {
+    this.mjpeg.chunks.push(chunk);
+  } else {
+    var part1 = chunk.slice(0, eoiPos + 2);
+    if (part1.length) {
+      this.mjpeg.chunks.push(part1);
+    }
+    if (this.mjpeg.chunks.length) {
+      var jpegImage = this.mjpeg.chunks.flat();
+      var rgba = this.mjpeg.decoderFn(jpegImage);
+      this.detectStream(rgba);
+    }
+    this.mjpeg.chunks = [];
+  }
+  if (soiPos > -1) {
+    this.mjpeg.chunks = [];
+    this.mjpeg.chunks.push(chunk.slice(soiPos));
+  }
+};
+
+AR.Detector.prototype.detect = function (image) {
+  CV.grayscale(image, this.grey);
+  CV.adaptiveThreshold(this.grey, this.thres, 2, 7);
+
+  this.contours = CV.findContours(this.thres, this.binary);
+  //Scale Fix: https://stackoverflow.com/questions/35936397/marker-detection-on-paper-sheet-using-javascript
+  //this.candidates = this.findCandidates(this.contours, image.width * 0.20, 0.05, 10);
+  this.candidates = this.findCandidates(this.contours, image.width * 0.01, 0.05, 10);
+  this.candidates = this.clockwiseCorners(this.candidates);
+  this.candidates = this.notTooNear(this.candidates, 10);
+
+  return this.findMarkers(this.grey, this.candidates, 49);
+};
+
+AR.Detector.prototype.findCandidates = function (contours, minSize, epsilon, minLength) {
+  var candidates = [],
+    len = contours.length,
+    contour, poly, i;
+
+  this.polys = [];
+
+  for (i = 0; i < len; ++i) {
+    contour = contours[i];
+
+    if (contour.length >= minSize) {
+      poly = CV.approxPolyDP(contour, contour.length * epsilon);
+
+      this.polys.push(poly);
+
+      if ((4 === poly.length) && (CV.isContourConvex(poly))) {
+
+        if (CV.minEdgeLength(poly) >= minLength) {
+          candidates.push(poly);
+        }
+      }
+    }
+  }
+
+  return candidates;
+};
+
+AR.Detector.prototype.clockwiseCorners = function (candidates) {
+  var len = candidates.length,
+    dx1, dx2, dy1, dy2, swap, i;
+
+  for (i = 0; i < len; ++i) {
+    dx1 = candidates[i][1].x - candidates[i][0].x;
+    dy1 = candidates[i][1].y - candidates[i][0].y;
+    dx2 = candidates[i][2].x - candidates[i][0].x;
+    dy2 = candidates[i][2].y - candidates[i][0].y;
+
+    if ((dx1 * dy2 - dy1 * dx2) < 0) {
+      swap = candidates[i][1];
+      candidates[i][1] = candidates[i][3];
+      candidates[i][3] = swap;
+    }
+  }
+
+  return candidates;
+};
+
+AR.Detector.prototype.notTooNear = function (candidates, minDist) {
+  var notTooNear = [],
+    len = candidates.length,
+    dist, dx, dy, i, j, k;
+
+  for (i = 0; i < len; ++i) {
+
+    for (j = i + 1; j < len; ++j) {
+      dist = 0;
+
+      for (k = 0; k < 4; ++k) {
+        dx = candidates[i][k].x - candidates[j][k].x;
+        dy = candidates[i][k].y - candidates[j][k].y;
+
+        dist += dx * dx + dy * dy;
+      }
+
+      if ((dist / 4) < (minDist * minDist)) {
+
+        if (CV.perimeter(candidates[i]) < CV.perimeter(candidates[j])) {
+          candidates[i].tooNear = true;
+        } else {
+          candidates[j].tooNear = true;
+        }
+      }
+    }
+  }
+
+  for (i = 0; i < len; ++i) {
+    if (!candidates[i].tooNear) {
+      notTooNear.push(candidates[i]);
+    }
+  }
+
+  return notTooNear;
+};
+
+AR.Detector.prototype.findMarkers = function (imageSrc, candidates, warpSize) {
+  var markers = [],
+    len = candidates.length,
+    candidate, marker, i;
+
+  for (i = 0; i < len; ++i) {
+    candidate = candidates[i];
+
+    CV.warp(imageSrc, this.homography, candidate, warpSize);
+
+    CV.threshold(this.homography, this.homography, CV.otsu(this.homography));
+
+    marker = this.getMarker(this.homography, candidate);
+    if (marker) {
+      markers.push(marker);
+    }
+  }
+
+  return markers;
+};
+
+AR.Detector.prototype.getMarker = function (imageSrc, candidate) {
+  var markSize = this.dictionary.markSize;
+  var width = (imageSrc.width / markSize) >>> 0,
+    minZero = (width * width) >> 1,
+    bits = [],
+    rotations = [],
+    square, inc, i, j;
+
+  for (i = 0; i < markSize; ++i) {
+    inc = (0 === i || (markSize - 1) === i) ? 1 : (markSize - 1);
+
+    for (j = 0; j < markSize; j += inc) {
+      square = {
+        x: j * width,
+        y: i * width,
+        width: width,
+        height: width
+      };
+      if (CV.countNonZero(imageSrc, square) > minZero) {
+        return null;
+      }
+    }
+  }
+
+  for (i = 0; i < markSize - 2; ++i) {
+    bits[i] = [];
+
+    for (j = 0; j < markSize - 2; ++j) {
+      square = {
+        x: (j + 1) * width,
+        y: (i + 1) * width,
+        width: width,
+        height: width
+      };
+
+      bits[i][j] = CV.countNonZero(imageSrc, square) > minZero ? 1 : 0;
+    }
+  }
+
+  rotations[0] = bits;
+
+  var foundMin = null;
+  var rot = 0;
+  for (i = 0; i < 4; i++) {
+    var found = this.dictionary.find(rotations[i]);
+    if (found && (foundMin === null || found.distance < foundMin.distance)) {
+      foundMin = found;
+      rot = i;
+      if (foundMin.distance === 0)
+        break;
+    }
+    rotations[i + 1] = this.rotate(rotations[i]);
+  }
+
+  if (foundMin)
+    return new AR.Marker(foundMin.id, this.rotate2(candidate, 4 - rot), foundMin.distance);
+
+  return null;
+};
+
+AR.Detector.prototype.rotate = function (src) {
+  var dst = [],
+    len = src.length,
+    i, j;
+
+  for (i = 0; i < len; ++i) {
+    dst[i] = [];
+    for (j = 0; j < src[i].length; ++j) {
+      dst[i][j] = src[src[i].length - j - 1][i];
+    }
+  }
+
+  return dst;
+};
+
+AR.Detector.prototype.rotate2 = function (src, rotation) {
+  var dst = [],
+    len = src.length,
+    i;
+
+  for (i = 0; i < len; ++i) {
+    dst[i] = src[(rotation + i) % len];
+  }
+
+  return dst;
+};
+/**
+Copyright 2017 Rafael Muñoz Salinas. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are
+permitted provided that the following conditions are met:
+
+   1. Redistributions of source code must retain the above copyright notice, this list of
+      conditions and the following disclaimer.
+
+   2. Redistributions in binary form must reproduce the above copyright notice, this list
+      of conditions and the following disclaimer in the documentation and/or other materials
+      provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY Rafael Muñoz Salinas ''AS IS'' AND ANY EXPRESS OR IMPLIED
+WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL Rafael Muñoz Salinas OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+The views and conclusions contained in the software and documentation are those of the
+authors and should not be interpreted as representing official policies, either expressed
+or implied, of Rafael Muñoz Salinas.
+*/
+
+//Dictionary extracted from https://sourceforge.net/projects/aruco/files/3.1.12/
+
+var AR = this.AR || require('../aruco').AR;
+AR.DICTIONARIES['ARUCO_DEFAULT'] = {
+  nBits: 25,
+  tau: 3,
+  codeList: [0x1084210,0x1084217,0x1084209,0x108420e,0x10842f0,0x10842f7,0x10842e9,0x10842ee,0x1084130,0x1084137,0x1084129,0x108412e,0x10841d0,0x10841d7,0x10841c9,0x10841ce,0x1085e10,0x1085e17,0x1085e09,0x1085e0e,0x1085ef0,0x1085ef7,0x1085ee9,0x1085eee,0x1085d30,0x1085d37,0x1085d29,0x1085d2e,0x1085dd0,0x1085dd7,0x1085dc9,0x1085dce,0x1082610,0x1082617,0x1082609,0x108260e,0x10826f0,0x10826f7,0x10826e9,0x10826ee,0x1082530,0x1082537,0x1082529,0x108252e,0x10825d0,0x10825d7,0x10825c9,0x10825ce,0x1083a10,0x1083a17,0x1083a09,0x1083a0e,0x1083af0,0x1083af7,0x1083ae9,0x1083aee,0x1083930,0x1083937,0x1083929,0x108392e,0x10839d0,0x10839d7,0x10839c9,0x10839ce,0x10bc210,0x10bc217,0x10bc209,0x10bc20e,0x10bc2f0,0x10bc2f7,0x10bc2e9,0x10bc2ee,0x10bc130,0x10bc137,0x10bc129,0x10bc12e,0x10bc1d0,0x10bc1d7,0x10bc1c9,0x10bc1ce,0x10bde10,0x10bde17,0x10bde09,0x10bde0e,0x10bdef0,0x10bdef7,0x10bdee9,0x10bdeee,0x10bdd30,0x10bdd37,0x10bdd29,0x10bdd2e,0x10bddd0,0x10bddd7,0x10bddc9,0x10bddce,0x10ba610,0x10ba617,0x10ba609,0x10ba60e,0x10ba6f0,0x10ba6f7,0x10ba6e9,0x10ba6ee,0x10ba530,0x10ba537,0x10ba529,0x10ba52e,0x10ba5d0,0x10ba5d7,0x10ba5c9,0x10ba5ce,0x10bba10,0x10bba17,0x10bba09,0x10bba0e,0x10bbaf0,0x10bbaf7,0x10bbae9,0x10bbaee,0x10bb930,0x10bb937,0x10bb929,0x10bb92e,0x10bb9d0,0x10bb9d7,0x10bb9c9,0x10bb9ce,0x104c210,0x104c217,0x104c209,0x104c20e,0x104c2f0,0x104c2f7,0x104c2e9,0x104c2ee,0x104c130,0x104c137,0x104c129,0x104c12e,0x104c1d0,0x104c1d7,0x104c1c9,0x104c1ce,0x104de10,0x104de17,0x104de09,0x104de0e,0x104def0,0x104def7,0x104dee9,0x104deee,0x104dd30,0x104dd37,0x104dd29,0x104dd2e,0x104ddd0,0x104ddd7,0x104ddc9,0x104ddce,0x104a610,0x104a617,0x104a609,0x104a60e,0x104a6f0,0x104a6f7,0x104a6e9,0x104a6ee,0x104a530,0x104a537,0x104a529,0x104a52e,0x104a5d0,0x104a5d7,0x104a5c9,0x104a5ce,0x104ba10,0x104ba17,0x104ba09,0x104ba0e,0x104baf0,0x104baf7,0x104bae9,0x104baee,0x104b930,0x104b937,0x104b929,0x104b92e,0x104b9d0,0x104b9d7,0x104b9c9,0x104b9ce,0x1074210,0x1074217,0x1074209,0x107420e,0x10742f0,0x10742f7,0x10742e9,0x10742ee,0x1074130,0x1074137,0x1074129,0x107412e,0x10741d0,0x10741d7,0x10741c9,0x10741ce,0x1075e10,0x1075e17,0x1075e09,0x1075e0e,0x1075ef0,0x1075ef7,0x1075ee9,0x1075eee,0x1075d30,0x1075d37,0x1075d29,0x1075d2e,0x1075dd0,0x1075dd7,0x1075dc9,0x1075dce,0x1072610,0x1072617,0x1072609,0x107260e,0x10726f0,0x10726f7,0x10726e9,0x10726ee,0x1072530,0x1072537,0x1072529,0x107252e,0x10725d0,0x10725d7,0x10725c9,0x10725ce,0x1073a10,0x1073a17,0x1073a09,0x1073a0e,0x1073af0,0x1073af7,0x1073ae9,0x1073aee,0x1073930,0x1073937,0x1073929,0x107392e,0x10739d0,0x10739d7,0x10739c9,0x10739ce,0x1784210,0x1784217,0x1784209,0x178420e,0x17842f0,0x17842f7,0x17842e9,0x17842ee,0x1784130,0x1784137,0x1784129,0x178412e,0x17841d0,0x17841d7,0x17841c9,0x17841ce,0x1785e10,0x1785e17,0x1785e09,0x1785e0e,0x1785ef0,0x1785ef7,0x1785ee9,0x1785eee,0x1785d30,0x1785d37,0x1785d29,0x1785d2e,0x1785dd0,0x1785dd7,0x1785dc9,0x1785dce,0x1782610,0x1782617,0x1782609,0x178260e,0x17826f0,0x17826f7,0x17826e9,0x17826ee,0x1782530,0x1782537,0x1782529,0x178252e,0x17825d0,0x17825d7,0x17825c9,0x17825ce,0x1783a10,0x1783a17,0x1783a09,0x1783a0e,0x1783af0,0x1783af7,0x1783ae9,0x1783aee,0x1783930,0x1783937,0x1783929,0x178392e,0x17839d0,0x17839d7,0x17839c9,0x17839ce,0x17bc210,0x17bc217,0x17bc209,0x17bc20e,0x17bc2f0,0x17bc2f7,0x17bc2e9,0x17bc2ee,0x17bc130,0x17bc137,0x17bc129,0x17bc12e,0x17bc1d0,0x17bc1d7,0x17bc1c9,0x17bc1ce,0x17bde10,0x17bde17,0x17bde09,0x17bde0e,0x17bdef0,0x17bdef7,0x17bdee9,0x17bdeee,0x17bdd30,0x17bdd37,0x17bdd29,0x17bdd2e,0x17bddd0,0x17bddd7,0x17bddc9,0x17bddce,0x17ba610,0x17ba617,0x17ba609,0x17ba60e,0x17ba6f0,0x17ba6f7,0x17ba6e9,0x17ba6ee,0x17ba530,0x17ba537,0x17ba529,0x17ba52e,0x17ba5d0,0x17ba5d7,0x17ba5c9,0x17ba5ce,0x17bba10,0x17bba17,0x17bba09,0x17bba0e,0x17bbaf0,0x17bbaf7,0x17bbae9,0x17bbaee,0x17bb930,0x17bb937,0x17bb929,0x17bb92e,0x17bb9d0,0x17bb9d7,0x17bb9c9,0x17bb9ce,0x174c210,0x174c217,0x174c209,0x174c20e,0x174c2f0,0x174c2f7,0x174c2e9,0x174c2ee,0x174c130,0x174c137,0x174c129,0x174c12e,0x174c1d0,0x174c1d7,0x174c1c9,0x174c1ce,0x174de10,0x174de17,0x174de09,0x174de0e,0x174def0,0x174def7,0x174dee9,0x174deee,0x174dd30,0x174dd37,0x174dd29,0x174dd2e,0x174ddd0,0x174ddd7,0x174ddc9,0x174ddce,0x174a610,0x174a617,0x174a609,0x174a60e,0x174a6f0,0x174a6f7,0x174a6e9,0x174a6ee,0x174a530,0x174a537,0x174a529,0x174a52e,0x174a5d0,0x174a5d7,0x174a5c9,0x174a5ce,0x174ba10,0x174ba17,0x174ba09,0x174ba0e,0x174baf0,0x174baf7,0x174bae9,0x174baee,0x174b930,0x174b937,0x174b929,0x174b92e,0x174b9d0,0x174b9d7,0x174b9c9,0x174b9ce,0x1774210,0x1774217,0x1774209,0x177420e,0x17742f0,0x17742f7,0x17742e9,0x17742ee,0x1774130,0x1774137,0x1774129,0x177412e,0x17741d0,0x17741d7,0x17741c9,0x17741ce,0x1775e10,0x1775e17,0x1775e09,0x1775e0e,0x1775ef0,0x1775ef7,0x1775ee9,0x1775eee,0x1775d30,0x1775d37,0x1775d29,0x1775d2e,0x1775dd0,0x1775dd7,0x1775dc9,0x1775dce,0x1772610,0x1772617,0x1772609,0x177260e,0x17726f0,0x17726f7,0x17726e9,0x17726ee,0x1772530,0x1772537,0x1772529,0x177252e,0x17725d0,0x17725d7,0x17725c9,0x17725ce,0x1773a10,0x1773a17,0x1773a09,0x1773a0e,0x1773af0,0x1773af7,0x1773ae9,0x1773aee,0x1773930,0x1773937,0x1773929,0x177392e,0x17739d0,0x17739d7,0x17739c9,0x17739ce,0x984210,0x984217,0x984209,0x98420e,0x9842f0,0x9842f7,0x9842e9,0x9842ee,0x984130,0x984137,0x984129,0x98412e,0x9841d0,0x9841d7,0x9841c9,0x9841ce,0x985e10,0x985e17,0x985e09,0x985e0e,0x985ef0,0x985ef7,0x985ee9,0x985eee,0x985d30,0x985d37,0x985d29,0x985d2e,0x985dd0,0x985dd7,0x985dc9,0x985dce,0x982610,0x982617,0x982609,0x98260e,0x9826f0,0x9826f7,0x9826e9,0x9826ee,0x982530,0x982537,0x982529,0x98252e,0x9825d0,0x9825d7,0x9825c9,0x9825ce,0x983a10,0x983a17,0x983a09,0x983a0e,0x983af0,0x983af7,0x983ae9,0x983aee,0x983930,0x983937,0x983929,0x98392e,0x9839d0,0x9839d7,0x9839c9,0x9839ce,0x9bc210,0x9bc217,0x9bc209,0x9bc20e,0x9bc2f0,0x9bc2f7,0x9bc2e9,0x9bc2ee,0x9bc130,0x9bc137,0x9bc129,0x9bc12e,0x9bc1d0,0x9bc1d7,0x9bc1c9,0x9bc1ce,0x9bde10,0x9bde17,0x9bde09,0x9bde0e,0x9bdef0,0x9bdef7,0x9bdee9,0x9bdeee,0x9bdd30,0x9bdd37,0x9bdd29,0x9bdd2e,0x9bddd0,0x9bddd7,0x9bddc9,0x9bddce,0x9ba610,0x9ba617,0x9ba609,0x9ba60e,0x9ba6f0,0x9ba6f7,0x9ba6e9,0x9ba6ee,0x9ba530,0x9ba537,0x9ba529,0x9ba52e,0x9ba5d0,0x9ba5d7,0x9ba5c9,0x9ba5ce,0x9bba10,0x9bba17,0x9bba09,0x9bba0e,0x9bbaf0,0x9bbaf7,0x9bbae9,0x9bbaee,0x9bb930,0x9bb937,0x9bb929,0x9bb92e,0x9bb9d0,0x9bb9d7,0x9bb9c9,0x9bb9ce,0x94c210,0x94c217,0x94c209,0x94c20e,0x94c2f0,0x94c2f7,0x94c2e9,0x94c2ee,0x94c130,0x94c137,0x94c129,0x94c12e,0x94c1d0,0x94c1d7,0x94c1c9,0x94c1ce,0x94de10,0x94de17,0x94de09,0x94de0e,0x94def0,0x94def7,0x94dee9,0x94deee,0x94dd30,0x94dd37,0x94dd29,0x94dd2e,0x94ddd0,0x94ddd7,0x94ddc9,0x94ddce,0x94a610,0x94a617,0x94a609,0x94a60e,0x94a6f0,0x94a6f7,0x94a6e9,0x94a6ee,0x94a530,0x94a537,0x94a529,0x94a52e,0x94a5d0,0x94a5d7,0x94a5c9,0x94a5ce,0x94ba10,0x94ba17,0x94ba09,0x94ba0e,0x94baf0,0x94baf7,0x94bae9,0x94baee,0x94b930,0x94b937,0x94b929,0x94b92e,0x94b9d0,0x94b9d7,0x94b9c9,0x94b9ce,0x974210,0x974217,0x974209,0x97420e,0x9742f0,0x9742f7,0x9742e9,0x9742ee,0x974130,0x974137,0x974129,0x97412e,0x9741d0,0x9741d7,0x9741c9,0x9741ce,0x975e10,0x975e17,0x975e09,0x975e0e,0x975ef0,0x975ef7,0x975ee9,0x975eee,0x975d30,0x975d37,0x975d29,0x975d2e,0x975dd0,0x975dd7,0x975dc9,0x975dce,0x972610,0x972617,0x972609,0x97260e,0x9726f0,0x9726f7,0x9726e9,0x9726ee,0x972530,0x972537,0x972529,0x97252e,0x9725d0,0x9725d7,0x9725c9,0x9725ce,0x973a10,0x973a17,0x973a09,0x973a0e,0x973af0,0x973af7,0x973ae9,0x973aee,0x973930,0x973937,0x973929,0x97392e,0x9739d0,0x9739d7,0x9739c9,0x9739ce,0xe84210,0xe84217,0xe84209,0xe8420e,0xe842f0,0xe842f7,0xe842e9,0xe842ee,0xe84130,0xe84137,0xe84129,0xe8412e,0xe841d0,0xe841d7,0xe841c9,0xe841ce,0xe85e10,0xe85e17,0xe85e09,0xe85e0e,0xe85ef0,0xe85ef7,0xe85ee9,0xe85eee,0xe85d30,0xe85d37,0xe85d29,0xe85d2e,0xe85dd0,0xe85dd7,0xe85dc9,0xe85dce,0xe82610,0xe82617,0xe82609,0xe8260e,0xe826f0,0xe826f7,0xe826e9,0xe826ee,0xe82530,0xe82537,0xe82529,0xe8252e,0xe825d0,0xe825d7,0xe825c9,0xe825ce,0xe83a10,0xe83a17,0xe83a09,0xe83a0e,0xe83af0,0xe83af7,0xe83ae9,0xe83aee,0xe83930,0xe83937,0xe83929,0xe8392e,0xe839d0,0xe839d7,0xe839c9,0xe839ce,0xebc210,0xebc217,0xebc209,0xebc20e,0xebc2f0,0xebc2f7,0xebc2e9,0xebc2ee,0xebc130,0xebc137,0xebc129,0xebc12e,0xebc1d0,0xebc1d7,0xebc1c9,0xebc1ce,0xebde10,0xebde17,0xebde09,0xebde0e,0xebdef0,0xebdef7,0xebdee9,0xebdeee,0xebdd30,0xebdd37,0xebdd29,0xebdd2e,0xebddd0,0xebddd7,0xebddc9,0xebddce,0xeba610,0xeba617,0xeba609,0xeba60e,0xeba6f0,0xeba6f7,0xeba6e9,0xeba6ee,0xeba530,0xeba537,0xeba529,0xeba52e,0xeba5d0,0xeba5d7,0xeba5c9,0xeba5ce,0xebba10,0xebba17,0xebba09,0xebba0e,0xebbaf0,0xebbaf7,0xebbae9,0xebbaee,0xebb930,0xebb937,0xebb929,0xebb92e,0xebb9d0,0xebb9d7,0xebb9c9,0xebb9ce,0xe4c210,0xe4c217,0xe4c209,0xe4c20e,0xe4c2f0,0xe4c2f7,0xe4c2e9,0xe4c2ee,0xe4c130,0xe4c137,0xe4c129,0xe4c12e,0xe4c1d0,0xe4c1d7,0xe4c1c9,0xe4c1ce,0xe4de10,0xe4de17,0xe4de09,0xe4de0e,0xe4def0,0xe4def7,0xe4dee9,0xe4deee,0xe4dd30,0xe4dd37,0xe4dd29,0xe4dd2e,0xe4ddd0,0xe4ddd7,0xe4ddc9,0xe4ddce,0xe4a610,0xe4a617,0xe4a609,0xe4a60e,0xe4a6f0,0xe4a6f7,0xe4a6e9,0xe4a6ee,0xe4a530,0xe4a537,0xe4a529,0xe4a52e,0xe4a5d0,0xe4a5d7,0xe4a5c9,0xe4a5ce,0xe4ba10,0xe4ba17,0xe4ba09,0xe4ba0e,0xe4baf0,0xe4baf7,0xe4bae9,0xe4baee,0xe4b930,0xe4b937,0xe4b929,0xe4b92e,0xe4b9d0,0xe4b9d7,0xe4b9c9,0xe4b9ce,0xe74210,0xe74217,0xe74209,0xe7420e,0xe742f0,0xe742f7,0xe742e9,0xe742ee,0xe74130,0xe74137,0xe74129,0xe7412e,0xe741d0,0xe741d7,0xe741c9,0xe741ce,0xe75e10,0xe75e17,0xe75e09,0xe75e0e,0xe75ef0,0xe75ef7,0xe75ee9,0xe75eee,0xe75d30,0xe75d37,0xe75d29,0xe75d2e,0xe75dd0,0xe75dd7,0xe75dc9,0xe75dce,0xe72610,0xe72617,0xe72609,0xe7260e,0xe726f0,0xe726f7,0xe726e9,0xe726ee,0xe72530,0xe72537,0xe72529,0xe7252e,0xe725d0,0xe725d7,0xe725c9,0xe725ce,0xe73a10,0xe73a17,0xe73a09,0xe73a0e,0xe73af0,0xe73af7,0xe73ae9,0xe73aee,0xe73930,0xe73937,0xe73929,0xe7392e,0xe739d0,0xe739d7,0xe739c9]
+};/*
+Copyright (c) 2012 Juan Mellado
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
+/*
+References:
+- "Iterative Pose Estimation using Coplanar Feature Points"
+  Denis Oberkampf, Daniel F. DeMenthon, Larry S. Davis
+  http://www.cfar.umd.edu/~daniel/daniel_papersfordownload/CoplanarPts.pdf
+*/
+
+var POS = POS || {};
+this.POS = POS;
+
+var SVD = this.SVD || require('./svd').SVD;
+
+POS.Posit = function(modelSize, focalLength){
+  this.objectPoints = this.buildModel(modelSize);
+  this.focalLength = focalLength;
+
+  this.objectVectors = [];
+  this.objectNormal = [];
+  this.objectMatrix = [[],[],[]];
+  
+  this.init();
+};
+
+POS.Posit.prototype.buildModel = function(modelSize){
+  var half = modelSize / 2.0;
+  
+  return [
+    [-half,  half, 0.0],
+    [ half,  half, 0.0],
+    [ half, -half, 0.0],
+    [-half, -half, 0.0] ];
+};
+
+POS.Posit.prototype.init = function(){
+  var np = this.objectPoints.length,
+      vectors = [], n = [], len = 0.0, row = 2, i;
+  
+  for (i = 0; i < np; ++ i){
+    this.objectVectors[i] = [this.objectPoints[i][0] - this.objectPoints[0][0],
+                             this.objectPoints[i][1] - this.objectPoints[0][1],
+                             this.objectPoints[i][2] - this.objectPoints[0][2]];
+                             
+    vectors[i] = [this.objectVectors[i][0],
+                  this.objectVectors[i][1],
+                  this.objectVectors[i][2]];
+  }
+
+  while(0.0 === len){
+    n[0] = this.objectVectors[1][1] * this.objectVectors[row][2] -
+           this.objectVectors[1][2] * this.objectVectors[row][1];
+    n[1] = this.objectVectors[1][2] * this.objectVectors[row][0] -
+           this.objectVectors[1][0] * this.objectVectors[row][2];
+    n[2] = this.objectVectors[1][0] * this.objectVectors[row][1] -
+           this.objectVectors[1][1] * this.objectVectors[row][0];
+    
+    len = Math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+    
+    ++ row;
+  }
+
+  for (i = 0; i < 3; ++ i){
+    this.objectNormal[i] = n[i] / len;
+  }
+
+  POS.pseudoInverse(vectors, np, this.objectMatrix);
+};
+
+POS.Posit.prototype.pose = function(imagePoints){
+  var posRotation1 = [[],[],[]], posRotation2 = [[],[],[]], posTranslation = [],
+      rotation1 = [[],[],[]], rotation2 = [[],[],[]], translation1 = [], translation2 = [],
+      error1, error2, valid1, valid2, i, j;
+
+  this.pos(imagePoints, posRotation1, posRotation2, posTranslation);
+
+  valid1 = this.isValid(posRotation1, posTranslation);
+  if (valid1){
+    error1 = this.iterate(imagePoints, posRotation1, posTranslation, rotation1, translation1);
+  }else{
+    error1 = {euclidean: -1.0, pixels: -1, maximum: -1.0};
+  }
+  
+  valid2 = this.isValid(posRotation2, posTranslation);
+  if (valid2){
+    error2 = this.iterate(imagePoints, posRotation2, posTranslation, rotation2, translation2);
+  }else{
+    error2 = {euclidean: -1.0, pixels: -1, maximum: -1.0};
+  }
+
+  for (i = 0; i < 3; ++ i){
+    for (j = 0; j < 3; ++ j){
+      if (valid1){
+        translation1[i] -= rotation1[i][j] * this.objectPoints[0][j];
+      }
+      if (valid2){
+        translation2[i] -= rotation2[i][j] * this.objectPoints[0][j];
+      }
+    }
+  }
+
+  return error1.euclidean < error2.euclidean?
+    new POS.Pose(error1.pixels, rotation1, translation1, error2.pixels, rotation2, translation2):
+    new POS.Pose(error2.pixels, rotation2, translation2, error1.pixels, rotation1, translation1);
+};
+
+POS.Posit.prototype.pos = function(imagePoints, rotation1, rotation2, translation){
+  var np = this.objectPoints.length, imageVectors = [],
+      i0 = [], j0 = [], ivec = [], jvec = [], row1 = [], row2 = [], row3 = [],
+      i0i0, j0j0, i0j0, delta, q, lambda, mu, scale, i, j;
+
+  for (i = 0; i < np; ++ i){
+    imageVectors[i] = [imagePoints[i].x - imagePoints[0].x,
+                       imagePoints[i].y - imagePoints[0].y];
+  }
+
+  //i0 and j0
+  for (i = 0; i < 3; ++ i){
+    i0[i] = 0.0;
+    j0[i] = 0.0;
+    for (j = 0; j < np; ++ j){
+      i0[i] += this.objectMatrix[i][j] * imageVectors[j][0];
+      j0[i] += this.objectMatrix[i][j] * imageVectors[j][1];
+    }
+  }
+
+  i0i0 = i0[0] * i0[0] + i0[1] * i0[1] + i0[2] * i0[2];
+  j0j0 = j0[0] * j0[0] + j0[1] * j0[1] + j0[2] * j0[2];
+  i0j0 = i0[0] * j0[0] + i0[1] * j0[1] + i0[2] * j0[2];
+
+  //Lambda and mu
+  delta = (j0j0 - i0i0) * (j0j0 - i0i0) + 4.0 * (i0j0 * i0j0);
+  
+  if (j0j0 - i0i0 >= 0.0){
+    q = (j0j0 - i0i0 + Math.sqrt(delta) ) / 2.0;
+  }else{
+    q = (j0j0 - i0i0 - Math.sqrt(delta) ) / 2.0;
+  }
+  
+  if (q >= 0.0){
+    lambda = Math.sqrt(q);
+    if (0.0 === lambda){
+      mu = 0.0;
+    }else{
+      mu = -i0j0 / lambda;
+    }
+  }else{
+    lambda = Math.sqrt( -(i0j0 * i0j0) / q);
+    if (0.0 === lambda){
+      mu = Math.sqrt(i0i0 - j0j0);
+    }else{
+      mu = -i0j0 / lambda;
+    }
+  }
+
+  //First rotation
+  for (i = 0; i < 3; ++ i){
+    ivec[i] = i0[i] + lambda * this.objectNormal[i];
+    jvec[i] = j0[i] + mu * this.objectNormal[i];
+  }
+  
+  scale = Math.sqrt(ivec[0] * ivec[0] + ivec[1] * ivec[1] + ivec[2] * ivec[2]);
+  
+  for (i = 0; i < 3; ++ i){
+    row1[i] = ivec[i] / scale;
+    row2[i] = jvec[i] / scale;
+  }
+  
+  row3[0] = row1[1] * row2[2] - row1[2] * row2[1];
+  row3[1] = row1[2] * row2[0] - row1[0] * row2[2];
+  row3[2] = row1[0] * row2[1] - row1[1] * row2[0];
+
+  for (i = 0; i < 3; ++ i){
+    rotation1[0][i] = row1[i];
+    rotation1[1][i] = row2[i];
+    rotation1[2][i] = row3[i];
+  }
+
+  //Second rotation
+  for (i = 0; i < 3; ++ i){
+    ivec[i] = i0[i] - lambda * this.objectNormal[i];
+    jvec[i] = j0[i] - mu * this.objectNormal[i];
+  }
+  
+  for (i = 0; i < 3; ++ i){
+    row1[i] = ivec[i] / scale;
+    row2[i] = jvec[i] / scale;
+  }
+  
+  row3[0] = row1[1] * row2[2] - row1[2] * row2[1];
+  row3[1] = row1[2] * row2[0] - row1[0] * row2[2];
+  row3[2] = row1[0] * row2[1] - row1[1] * row2[0];
+  
+  for (i = 0; i < 3; ++ i){
+    rotation2[0][i] = row1[i];
+    rotation2[1][i] = row2[i];
+    rotation2[2][i] = row3[i];
+  }
+
+  //Translation
+  translation[0] = imagePoints[0].x / scale;
+  translation[1] = imagePoints[0].y / scale;
+  translation[2] = this.focalLength / scale;
+};
+
+POS.Posit.prototype.isValid = function(rotation, translation){
+  var np = this.objectPoints.length, zmin = Infinity, i = 0, zi;
+
+  for (; i < np; ++ i){
+    zi = translation[2] +
+      (rotation[2][0] * this.objectVectors[i][0] +
+       rotation[2][1] * this.objectVectors[i][1] +
+       rotation[2][2] * this.objectVectors[i][2]);
+    if (zi < zmin){
+      zmin = zi;
+    }
+  }
+
+  return zmin >= 0.0;
+};
+
+POS.Posit.prototype.iterate = function(imagePoints, posRotation, posTranslation, rotation, translation){
+  var np = this.objectPoints.length,
+      oldSopImagePoints = [], sopImagePoints = [],
+      rotation1 = [[],[],[]], rotation2 = [[],[],[]],
+      translation1 = [], translation2 = [],
+      converged = false, iteration = 0,
+      oldImageDifference, imageDifference, factor,
+      error, error1, error2, delta, i, j;
+
+  for (i = 0; i < np; ++ i){
+    oldSopImagePoints[i] = {x: imagePoints[i].x,
+                            y: imagePoints[i].y};
+  }
+  
+  for (i = 0; i < 3; ++ i){
+    for (j = 0; j < 3; ++ j){
+      rotation[i][j] = posRotation[i][j];
+    }
+    translation[i] = posTranslation[i];
+  }
+
+  for (i = 0; i < np; ++ i){
+    factor = 0.0;
+    for (j = 0; j < 3; ++ j){
+      factor += this.objectVectors[i][j] * rotation[2][j] / translation[2];
+    }
+    sopImagePoints[i] = {x: (1.0 + factor) * imagePoints[i].x,
+                         y: (1.0 + factor) * imagePoints[i].y};
+  }
+
+  imageDifference = 0.0;
+  
+  for (i = 0; i < np; ++ i){
+    imageDifference += Math.abs(sopImagePoints[i].x - oldSopImagePoints[i].x);
+    imageDifference += Math.abs(sopImagePoints[i].y - oldSopImagePoints[i].y);
+  }
+
+  for (i = 0; i < 3; ++ i){
+    translation1[i] = translation[i] -
+      (rotation[i][0] * this.objectPoints[0][0] +
+       rotation[i][1] * this.objectPoints[0][1] +
+       rotation[i][2] * this.objectPoints[0][2]);
+  }
+  
+  error = error1 = this.error(imagePoints, rotation, translation1);
+
+  //Convergence
+  converged = (0.0 === error1.pixels) || (imageDifference < 0.01);
+  
+  while( iteration ++ < 100 && !converged ){
+  
+    for (i = 0; i < np; ++ i){
+      oldSopImagePoints[i].x = sopImagePoints[i].x;
+      oldSopImagePoints[i].y = sopImagePoints[i].y;
+    }
+
+    this.pos(sopImagePoints, rotation1, rotation2, translation);
+
+    for (i = 0; i < 3; ++ i){
+      translation1[i] = translation[i] -
+        (rotation1[i][0] * this.objectPoints[0][0] +
+         rotation1[i][1] * this.objectPoints[0][1] +
+         rotation1[i][2] * this.objectPoints[0][2]);
+        
+      translation2[i] = translation[i] -
+        (rotation2[i][0] * this.objectPoints[0][0] +
+         rotation2[i][1] * this.objectPoints[0][1] +
+         rotation2[i][2] * this.objectPoints[0][2]);
+    }
+
+    error1 = this.error(imagePoints, rotation1, translation1);
+    error2 = this.error(imagePoints, rotation2, translation2);
+
+    if ( (error1.euclidean >= 0.0) && (error2.euclidean >= 0.0) ){
+      if (error2.euclidean < error1.euclidean){
+        error = error2;
+        for (i = 0; i < 3; ++ i){
+          for (j = 0; j < 3; ++ j){
+            rotation[i][j] = rotation2[i][j];
+          }
+        }
+      }else{
+        error = error1;
+        for (i = 0; i < 3; ++ i){
+          for (j = 0; j < 3; ++ j){
+            rotation[i][j] = rotation1[i][j];
+          }
+        }
+      }
+    }
+
+    if ( (error1.euclidean < 0.0) && (error2.euclidean >= 0.0) ){
+      error = error2;
+      for (i = 0; i < 3; ++ i){
+        for (j = 0; j < 3; ++ j){
+          rotation[i][j] = rotation2[i][j];
+        }
+      }
+    }
+    
+    if ( (error2.euclidean < 0.0) && (error1.euclidean >= 0.0) ){
+      error = error1;
+      for (i = 0; i < 3; ++ i){
+        for (j = 0; j < 3; ++ j){
+          rotation[i][j] = rotation1[i][j];
+        }
+      }
+    }
+
+    for (i = 0; i < np; ++ i){
+      factor = 0.0;
+      for (j = 0; j < 3; ++ j){
+        factor += this.objectVectors[i][j] * rotation[2][j] / translation[2];
+      }
+      sopImagePoints[i].x = (1.0 + factor) * imagePoints[i].x;
+      sopImagePoints[i].y = (1.0 + factor) * imagePoints[i].y;
+    }
+
+    oldImageDifference = imageDifference;
+    imageDifference = 0.0;
+    
+    for (i = 0; i < np; ++ i){
+      imageDifference += Math.abs(sopImagePoints[i].x - oldSopImagePoints[i].x);
+      imageDifference += Math.abs(sopImagePoints[i].y - oldSopImagePoints[i].y);
+    }
+
+    delta = Math.abs(imageDifference - oldImageDifference);
+
+    converged = (0.0 === error.pixels) || (delta < 0.01);
+  }
+  
+  return error;
+};
+
+POS.Posit.prototype.error = function(imagePoints, rotation, translation){
+  var np = this.objectPoints.length,
+      move = [], projection = [], errorvec = [],
+      euclidean = 0.0, pixels = 0.0, maximum = 0.0,
+      i, j, k;
+
+  if ( !this.isValid(rotation, translation) ){
+    return {euclidean: -1.0, pixels: -1, maximum: -1.0};
+  }
+  
+  for (i = 0; i < np; ++ i){
+    move[i] = [];
+    for (j = 0; j < 3; ++ j){
+      move[i][j] = translation[j];
+    }
+  }
+  
+  for (i = 0; i < np; ++ i){
+    for (j = 0; j < 3; ++ j){
+      for (k = 0; k < 3; ++ k){
+        move[i][j] += rotation[j][k] * this.objectPoints[i][k];
+      }
+    }
+  }
+
+  for (i = 0; i < np; ++ i){
+    projection[i] = [];
+    for (j = 0; j < 2; ++ j){
+      projection[i][j] = this.focalLength * move[i][j] / move[i][2];
+    }
+  }
+  
+  for (i = 0; i < np; ++ i){
+    errorvec[i] = [projection[i][0] - imagePoints[i].x,
+                   projection[i][1] - imagePoints[i].y];
+  }
+
+  for (i = 0; i < np; ++ i){
+    euclidean += Math.sqrt(errorvec[i][0] * errorvec[i][0] +
+                           errorvec[i][1] * errorvec[i][1]);
+                       
+    pixels += Math.abs( Math.round(projection[i][0]) - Math.round(imagePoints[i].x) ) +
+              Math.abs( Math.round(projection[i][1]) - Math.round(imagePoints[i].y) );
+              
+    if (Math.abs(errorvec[i][0]) > maximum){
+      maximum = Math.abs(errorvec[i][0]);
+    }
+    if (Math.abs(errorvec[i][1]) > maximum){
+      maximum = Math.abs(errorvec[i][1]);
+    }
+  }
+
+  return {euclidean: euclidean / np, pixels: pixels, maximum: maximum};
+};
+
+POS.pseudoInverse = function(a, n, b){
+  var w = [], v = [[],[],[]], s = [[],[],[]],
+      wmax = 0.0, cn = 0,
+      i, j, k;
+
+  SVD.svdcmp(a, n, 3, w, v);
+
+  for (i = 0; i < 3; ++ i){
+    if (w[i] > wmax){
+      wmax = w[i];
+    }
+  }
+
+  wmax *= 0.01;
+
+  for (i = 0; i < 3; ++ i){
+    if (w[i] < wmax){
+      w[i] = 0.0;
+    }
+  }
+
+  for (j = 0; j < 3; ++ j){
+    if (0.0 === w[j]){
+      ++ cn;
+      for (k = j; k < 2; ++ k){
+        for (i = 0; i < n; ++ i){
+          a[i][k] = a[i][k + 1];
+        }
+        for (i = 0; i < 3; ++ i){
+          v[i][k] = v[i][k + 1];
+        }
+      }
+    }
+  }
+
+  for (j = 0; j < 2; ++ j){
+    if (0.0 === w[j]){
+      w[j] = w[j + 1];
+    }
+  }
+
+  for (i = 0; i < 3; ++ i){
+    for (j = 0; j < 3 - cn; ++ j){
+      s[i][j] = v[i][j] / w[j];
+    }
+  }
+  
+  for (i = 0; i < 3; ++ i){
+    for (j = 0; j < n; ++ j){
+      b[i][j] = 0.0;
+      for (k = 0; k < 3 - cn; ++ k){
+        b[i][j] += s[i][k] * a[j][k];
+      }
+    }
+  }
+};
+
+POS.Pose = function(error1, rotation1, translation1, error2, rotation2, translation2){
+  this.bestError = error1;
+  this.bestRotation = rotation1;
+  this.bestTranslation = translation1;
+  this.alternativeError = error2;
+  this.alternativeRotation = rotation2;
+  this.alternativeTranslation = translation2;
+};
+
+</script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
 <script>
 'use strict';
 
 // ═══════════════════════════════════════════════
-// SHI-TOMASI CORNER DETECTION + LUCAS-KANADE
-// Custom implementation, no external library
+// MODEL
 // ═══════════════════════════════════════════════
-//
-// We work on a downscaled grayscale image (e.g. 320×240) for speed.
-// Shi-Tomasi finds "good corners" = points where the image gradient
-// is strong in BOTH directions (so they can be tracked reliably).
-// Lucas-Kanade tracks each corner by solving the optical flow equation
-// in a small window (default 9×9) around each point.
+const MODEL = {
+  markers: [
+    { id: 0, name: 'PIL-A1', ax: 0, ay: 0, az: 0 },
+    { id: 1, name: 'PIL-A2', ax: 5, ay: 0, az: 0 },
+    { id: 2, name: 'PIL-B1', ax: 0, ay: 4, az: 0 },
+    { id: 3, name: 'PIL-B2', ax: 5, ay: 4, az: 0 },
+  ],
+  elements: [
+    { id:'PIL-A1', type:'column', x:0, y:0, z:0, h:3.2, r:0.15 },
+    { id:'PIL-A2', type:'column', x:5, y:0, z:0, h:3.2, r:0.15 },
+    { id:'PIL-B1', type:'column', x:0, y:4, z:0, h:3.2, r:0.15 },
+    { id:'PIL-B2', type:'column', x:5, y:4, z:0, h:3.2, r:0.15 },
+    { id:'TRV-1', type:'beam', x1:0, y1:0, x2:5, y2:0, z:3.2, w:0.25, h:0.45 },
+    { id:'TRV-2', type:'beam', x1:0, y1:4, x2:5, y2:4, z:3.2, w:0.25, h:0.45 },
+    { id:'TRV-3', type:'beam', x1:0, y1:0, x2:0, y2:4, z:3.2, w:0.25, h:0.45 },
+    { id:'TRV-4', type:'beam', x1:5, y1:0, x2:5, y2:4, z:3.2, w:0.25, h:0.45 },
+    { id:'PAR-1', type:'wall', x1:5, y1:0, x2:5, y2:4, z:0, h:3.2, t:0.2 },
+  ]
+};
+const MARKER_MAP = {};
+MODEL.markers.forEach(m => { MARKER_MAP[m.id] = m; });
 
-// ─── Image utilities ───────────────────────────
+// ═══════════════════════════════════════════════
+// OPTICAL FLOW — same library as L1
+// ═══════════════════════════════════════════════
 function rgbaToGray(rgba, w, h) {
-  // Returns Float32Array of length w*h
   const gray = new Float32Array(w * h);
   for (let i = 0, p = 0; p < gray.length; p++, i += 4) {
-    // Luminance, ITU-R BT.601 weights
     gray[p] = 0.299 * rgba[i] + 0.587 * rgba[i+1] + 0.114 * rgba[i+2];
   }
   return gray;
 }
-
-// Bilinear sample (sub-pixel) from grayscale image
 function sample(gray, w, h, x, y) {
   if (x < 0 || x >= w-1 || y < 0 || y >= h-1) return 0;
   const x0 = Math.floor(x), y0 = Math.floor(y);
   const fx = x - x0, fy = y - y0;
   const i = y0 * w + x0;
-  const v00 = gray[i];
-  const v10 = gray[i + 1];
-  const v01 = gray[i + w];
-  const v11 = gray[i + w + 1];
-  return (1-fx)*(1-fy)*v00 + fx*(1-fy)*v10 + (1-fx)*fy*v01 + fx*fy*v11;
+  return (1-fx)*(1-fy)*gray[i] + fx*(1-fy)*gray[i+1] + (1-fx)*fy*gray[i+w] + fx*fy*gray[i+w+1];
 }
+function gradX(g,w,h,x,y){return 0.5*(sample(g,w,h,x+1,y)-sample(g,w,h,x-1,y));}
+function gradY(g,w,h,x,y){return 0.5*(sample(g,w,h,x,y+1)-sample(g,w,h,x,y-1));}
 
-// Image gradient at (x, y) via central differences
-function gradX(gray, w, h, x, y) {
-  return 0.5 * (sample(gray, w, h, x+1, y) - sample(gray, w, h, x-1, y));
-}
-function gradY(gray, w, h, x, y) {
-  return 0.5 * (sample(gray, w, h, x, y+1) - sample(gray, w, h, x, y-1));
-}
-
-// ─── Shi-Tomasi corner detector ────────────────
-// Find points where min eigenvalue of the structure tensor is large.
-// Returns array of {x, y, score} sorted by score, then non-max suppressed.
-function detectShiTomasi(gray, w, h, opts={}) {
-  const winSize  = opts.winSize  || 5;   // half-window for structure tensor
-  const minScore = opts.minScore || 6;   // minimum eigenvalue threshold
-  const minDist  = opts.minDist  || 12;  // min pixel distance between features
-  const maxFeats = opts.maxFeats || 100;
-  const skip     = opts.skip     || 4;   // sample every N pixels (speed)
-  const border   = winSize + 2;
-
-  const candidates = [];
-  for (let y = border; y < h - border; y += skip) {
-    for (let x = border; x < w - border; x += skip) {
-      // Structure tensor
-      let Sxx = 0, Syy = 0, Sxy = 0;
-      for (let dy = -winSize; dy <= winSize; dy++) {
-        for (let dx = -winSize; dx <= winSize; dx++) {
-          const gx = gradX(gray, w, h, x+dx, y+dy);
-          const gy = gradY(gray, w, h, x+dx, y+dy);
-          Sxx += gx*gx; Syy += gy*gy; Sxy += gx*gy;
-        }
-      }
-      // Min eigenvalue of [[Sxx,Sxy],[Sxy,Syy]]
-      const trace = Sxx + Syy;
-      const det   = Sxx*Syy - Sxy*Sxy;
-      const disc  = Math.sqrt(Math.max(0, trace*trace/4 - det));
-      const lambdaMin = trace/2 - disc;
-      const score = lambdaMin / (winSize*winSize*4); // normalize
-      if (score > minScore) candidates.push({ x, y, score });
+function detectShiTomasi(gray, w, h, opts) {
+  opts = opts || {};
+  const winSize = opts.winSize || 4;
+  const minScore = opts.minScore || 5;
+  const minDist = opts.minDist || 14;
+  const maxFeats = opts.maxFeats || 80;
+  const skip = opts.skip || 4;
+  const border = winSize + 2;
+  const cand = [];
+  for (let y=border; y<h-border; y+=skip) for (let x=border; x<w-border; x+=skip) {
+    let Sxx=0, Syy=0, Sxy=0;
+    for (let dy=-winSize; dy<=winSize; dy++) for (let dx=-winSize; dx<=winSize; dx++) {
+      const gx = gradX(gray,w,h,x+dx,y+dy), gy = gradY(gray,w,h,x+dx,y+dy);
+      Sxx+=gx*gx; Syy+=gy*gy; Sxy+=gx*gy;
     }
+    const tr = Sxx+Syy, det = Sxx*Syy-Sxy*Sxy;
+    const disc = Math.sqrt(Math.max(0, tr*tr/4-det));
+    const lambdaMin = tr/2 - disc;
+    const score = lambdaMin / (winSize*winSize*4);
+    if (score > minScore) cand.push({x,y,score});
   }
-
-  // Sort by score descending
-  candidates.sort((a,b) => b.score - a.score);
-
-  // Non-maximum suppression with minDist
-  const selected = [];
-  const md2 = minDist * minDist;
-  outer:
-  for (const c of candidates) {
-    for (const s of selected) {
-      const dx = c.x - s.x, dy = c.y - s.y;
-      if (dx*dx + dy*dy < md2) continue outer;
+  cand.sort((a,b)=>b.score-a.score);
+  const sel = []; const md2 = minDist*minDist;
+  outer: for (const c of cand) {
+    for (const s of sel) {
+      const dx=c.x-s.x, dy=c.y-s.y;
+      if (dx*dx+dy*dy < md2) continue outer;
     }
-    selected.push(c);
-    if (selected.length >= maxFeats) break;
+    sel.push(c);
+    if (sel.length >= maxFeats) break;
   }
-  return selected;
+  return sel;
 }
 
-// ─── Lucas-Kanade tracker ─────────────────────
-// Track each feature from gray1 to gray2.
-// Returns array same length as features, with {x, y, ok} for each.
-function trackLK(gray1, gray2, features, w, h, opts={}) {
-  const winRadius = opts.winRadius || 4;   // window half-size
-  const maxIter   = opts.maxIter   || 8;
-  const eps       = opts.eps       || 0.05;
-  const maxResidual = opts.maxResidual || 50;
-
+function trackLK(g1, g2, features, w, h, opts) {
+  opts = opts || {};
+  const wr = opts.winRadius || 4;
+  const maxIter = opts.maxIter || 8;
+  const eps = opts.eps || 0.05;
+  const maxRes = opts.maxResidual || 40;
   const out = [];
   for (const f of features) {
-    let dx = 0, dy = 0;
-    let ok = true;
-
-    // Pre-compute gradients and image patch at the original location (gray1)
-    // for the spatial part of LK
-    let Gxx = 0, Gyy = 0, Gxy = 0;
-    const Ix = [], Iy = [], I1 = [];
-    for (let py = -winRadius; py <= winRadius; py++) {
-      for (let px = -winRadius; px <= winRadius; px++) {
-        const sx = f.x + px, sy = f.y + py;
-        const ix = gradX(gray1, w, h, sx, sy);
-        const iy = gradY(gray1, w, h, sx, sy);
-        Ix.push(ix); Iy.push(iy);
-        I1.push(sample(gray1, w, h, sx, sy));
-        Gxx += ix*ix; Gyy += iy*iy; Gxy += ix*iy;
-      }
+    let dx=0, dy=0, ok=true;
+    let Gxx=0, Gyy=0, Gxy=0;
+    const Ix=[], Iy=[], I1=[];
+    for (let py=-wr; py<=wr; py++) for (let px=-wr; px<=wr; px++) {
+      const sx=f.x+px, sy=f.y+py;
+      const ix = gradX(g1,w,h,sx,sy), iy = gradY(g1,w,h,sx,sy);
+      Ix.push(ix); Iy.push(iy); I1.push(sample(g1,w,h,sx,sy));
+      Gxx+=ix*ix; Gyy+=iy*iy; Gxy+=ix*iy;
     }
-
-    const det = Gxx*Gyy - Gxy*Gxy;
-    if (det < 1e-3) { out.push({ x:f.x, y:f.y, ok:false }); continue; }
-
-    const invDet = 1 / det;
-
-    // Iterative refinement
-    for (let iter = 0; iter < maxIter; iter++) {
-      let bx = 0, by = 0;
-      let idx = 0;
-      for (let py = -winRadius; py <= winRadius; py++) {
-        for (let px = -winRadius; px <= winRadius; px++) {
-          const sx2 = f.x + px + dx;
-          const sy2 = f.y + py + dy;
-          const I2 = sample(gray2, w, h, sx2, sy2);
-          const dI = I1[idx] - I2;
-          bx += Ix[idx] * dI;
-          by += Iy[idx] * dI;
-          idx++;
-        }
-      }
-      // Solve [Gxx Gxy; Gxy Gyy] · [vx; vy] = [bx; by]
-      const vx = (Gyy*bx - Gxy*by) * invDet;
-      const vy = (Gxx*by - Gxy*bx) * invDet;
-      dx += vx; dy += vy;
-      if (Math.abs(vx) < eps && Math.abs(vy) < eps) break;
-    }
-
-    // Verify residual: was the match plausible?
-    let residual = 0;
-    let idx = 0;
-    for (let py = -winRadius; py <= winRadius; py++) {
-      for (let px = -winRadius; px <= winRadius; px++) {
-        const d = I1[idx] - sample(gray2, w, h, f.x+px+dx, f.y+py+dy);
-        residual += d*d;
+    const det = Gxx*Gyy-Gxy*Gxy;
+    if (det < 1e-3) { out.push({x:f.x,y:f.y,ok:false}); continue; }
+    const invDet = 1/det;
+    for (let iter=0; iter<maxIter; iter++) {
+      let bx=0, by=0; let idx=0;
+      for (let py=-wr; py<=wr; py++) for (let px=-wr; px<=wr; px++) {
+        const I2 = sample(g2,w,h,f.x+px+dx,f.y+py+dy);
+        const dI = I1[idx]-I2;
+        bx += Ix[idx]*dI; by += Iy[idx]*dI;
         idx++;
       }
+      const vx = (Gyy*bx-Gxy*by)*invDet;
+      const vy = (Gxx*by-Gxy*bx)*invDet;
+      dx += vx; dy += vy;
+      if (Math.abs(vx)<eps && Math.abs(vy)<eps) break;
     }
-    residual = Math.sqrt(residual / I1.length);
-    if (residual > maxResidual) ok = false;
-
-    const nx = f.x + dx, ny = f.y + dy;
-    if (nx < winRadius || nx > w-winRadius-1 || ny < winRadius || ny > h-winRadius-1) ok = false;
-
-    out.push({ x: nx, y: ny, ok, residual });
+    let res=0; let idx=0;
+    for (let py=-wr; py<=wr; py++) for (let px=-wr; px<=wr; px++) {
+      const d = I1[idx]-sample(g2,w,h,f.x+px+dx,f.y+py+dy);
+      res += d*d; idx++;
+    }
+    res = Math.sqrt(res/I1.length);
+    if (res > maxRes) ok = false;
+    const nx = f.x+dx, ny = f.y+dy;
+    if (nx<wr || nx>w-wr-1 || ny<wr || ny>h-wr-1) ok = false;
+    out.push({x:nx, y:ny, ok, residual:res});
   }
   return out;
 }
 
 // ═══════════════════════════════════════════════
+// IMU
+// ═══════════════════════════════════════════════
+const IMU = { a:0, b:0, g:0, ready:false };
+
+function onOrientation(e) {
+  if (e.alpha === null && e.beta === null) return;
+  IMU.a = e.alpha || 0; IMU.b = e.beta || 0; IMU.g = e.gamma || 0;
+  IMU.ready = true;
+}
+
+async function requestGyro() {
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    try {
+      const r = await DeviceOrientationEvent.requestPermission();
+      if (r === 'granted') {
+        window.addEventListener('deviceorientation', onOrientation, true);
+        return true;
+      }
+    } catch(e){}
+    return false;
+  }
+  window.addEventListener('deviceorientation', onOrientation, true);
+  return true;
+}
+
+function imuToCamQuat() {
+  const a = THREE.MathUtils.degToRad(IMU.a);
+  const b = THREE.MathUtils.degToRad(IMU.b);
+  const g = THREE.MathUtils.degToRad(IMU.g);
+  const qDev = new THREE.Quaternion();
+  qDev.setFromEuler(new THREE.Euler(b, a, -g, 'YXZ'));
+  const align = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), -Math.PI/2);
+  return qDev.multiply(align);
+}
+
+// ═══════════════════════════════════════════════
 // APP STATE
 // ═══════════════════════════════════════════════
-const OF_W = 320; // optical-flow working width
-let OF_H;         // computed from aspect ratio
+const OF_W = 320;
+let OF_H;
+let MARKER_SIZE_M = 0.05;
 
 const video    = document.getElementById('cam');
 const overlay  = document.getElementById('overlay');
 const overCtx  = overlay.getContext('2d');
 const work     = document.getElementById('work');
-const workCtx  = work.getContext('2d', { willReadFrequently: true });
+const workCtx  = work.getContext('2d', { willReadFrequently:true });
+const c3d      = document.getElementById('c3d');
+
+let detector, posit;
+let renderer, scene, cam3, modelGroup;
 
 const STATE = {
-  camOk: false,
+  camOk: false, threeOk: false,
   prevGray: null,
-  features: [],   // array of {x, y, age, vx, vy, history}
-  showTrails: true,
-  lastT: 0,
-  fpsT: 0, frames: 0, fps: 0,
+  prevImuQuat: null,
+  features: [],
   redetectCounter: 0,
-  lostTotal: 0,
+  fpsT:0, frames:0, fps:0,
+  lastT:0,
+  showOF: true,
+  showMarkers: true,
 };
 
-function setStatus(t) { document.getElementById('status').textContent = t; }
+const ANCHOR = {
+  set: false,
+  modelMatrix: new THREE.Matrix4(),
+  // Camera position in WORLD frame. Updated by optical flow translation.
+  camPos: new THREE.Vector3(),
+  // Distance to scene (m) — used to convert pixel flow to metres.
+  // Initially set to POSIT distance to marker. Refined later.
+  sceneDistance: 1.5,
+};
+
+function setStatus(t, kind) {
+  document.getElementById('status').textContent = t;
+  const el = document.getElementById('status');
+  el.classList.remove('anchored','searching');
+  if (kind) el.classList.add(kind);
+}
 
 // ═══════════════════════════════════════════════
 // CAMERA
@@ -296,7 +2372,6 @@ async function startCamera() {
     STATE.camOk = true;
     OF_H = Math.round(OF_W * video.videoHeight / video.videoWidth);
     work.width = OF_W; work.height = OF_H;
-    document.getElementById('i-res').textContent = OF_W + '×' + OF_H;
     return true;
   } catch(e) { setStatus('Camera non disponibile'); return false; }
 }
@@ -305,167 +2380,433 @@ function getCoverTransform(vw, vh) {
   const sw = window.innerWidth, sh = window.innerHeight;
   const vA = vw/vh, sA = sw/sh;
   let scale, offX=0, offY=0;
-  if (vA > sA) { scale = sh/vh; offX = (sw - vw*scale)/2; }
-  else         { scale = sw/vw; offY = (sh - vh*scale)/2; }
+  if (vA > sA) { scale=sh/vh; offX=(sw-vw*scale)/2; }
+  else         { scale=sw/vw; offY=(sh-vh*scale)/2; }
   return { scale, offX, offY };
 }
 
 function resizeOverlay() {
   const dpr = window.devicePixelRatio || 1;
-  overlay.width  = window.innerWidth  * dpr;
+  overlay.width = window.innerWidth * dpr;
   overlay.height = window.innerHeight * dpr;
-  overlay.style.width  = window.innerWidth  + 'px';
+  overlay.style.width = window.innerWidth + 'px';
   overlay.style.height = window.innerHeight + 'px';
   overCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
 // ═══════════════════════════════════════════════
-// DRAW FEATURES
+// THREE.JS
 // ═══════════════════════════════════════════════
-function drawFeatures(T) {
-  // T maps OF (320×OF_H) coordinates into screen pixels.
-  // But the video on screen uses object-fit:cover scaling from the full
-  // video size (e.g. 1280×720), so we need to scale our OF coords
-  // up to video coords first.
-  const ofToVid = video.videoWidth / OF_W;
+function initThree() {
+  renderer = new THREE.WebGLRenderer({ canvas:c3d, alpha:true, antialias:true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setClearColor(0,0);
 
+  scene = new THREE.Scene();
+  cam3 = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.01, 100);
+  cam3.position.set(0,0,0);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.5);
+  dir.position.set(2,5,3); scene.add(dir);
+
+  modelGroup = new THREE.Group();
+  modelGroup.visible = false;
+  scene.add(modelGroup);
+  buildModel(modelGroup);
+  STATE.threeOk = true;
+
+  window.addEventListener('resize', () => {
+    cam3.aspect = window.innerWidth/window.innerHeight;
+    cam3.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    resizeOverlay();
+  });
+}
+
+function buildModel(group) {
+  const COL=0x4a9eff, BEAM=0xff8c2e, WALL=0xf5f2eb;
+  MODEL.elements.forEach(el => {
+    let mesh;
+    if (el.type === 'column') {
+      const g = new THREE.CylinderGeometry(el.r, el.r, el.h, 12);
+      mesh = new THREE.Mesh(g, new THREE.MeshPhongMaterial({color:COL, opacity:.55, transparent:true}));
+      mesh.rotation.x = Math.PI/2;
+      mesh.position.set(el.x, el.y, el.z+el.h/2);
+      mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({color:COL})));
+    } else if (el.type === 'beam' || el.type === 'wall') {
+      const dx=el.x2-el.x1, dy=el.y2-el.y1;
+      const len = Math.hypot(dx, dy);
+      const w = el.type==='beam' ? el.w : el.t;
+      const h = el.h;
+      const g = new THREE.BoxGeometry(len, w, h);
+      const color = el.type==='beam' ? BEAM : WALL;
+      const op = el.type==='beam' ? .55 : .25;
+      mesh = new THREE.Mesh(g, new THREE.MeshPhongMaterial({color, opacity:op, transparent:true}));
+      mesh.position.set((el.x1+el.x2)/2, (el.y1+el.y2)/2, el.z+h/2);
+      mesh.rotation.z = Math.atan2(dy, dx);
+      mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({color})));
+    }
+    if (mesh) group.add(mesh);
+  });
+  MODEL.markers.forEach(mk => {
+    const s = MARKER_SIZE_M;
+    const g = new THREE.BoxGeometry(s, s, 0.005);
+    const mesh = new THREE.Mesh(g, new THREE.MeshPhongMaterial({color:0xe8410a, opacity:.9, transparent:true}));
+    mesh.position.set(mk.ax, mk.ay, mk.az);
+    group.add(mesh);
+  });
+  group.add(new THREE.Mesh(new THREE.SphereGeometry(0.05,8,8), new THREE.MeshPhongMaterial({color:0xff0000})));
+  group.add(new THREE.AxesHelper(0.3));
+}
+
+// ═══════════════════════════════════════════════
+// POSIT → THREE
+// ═══════════════════════════════════════════════
+function posit2three(pose) {
+  const R = pose.bestRotation, T = pose.bestTranslation;
+  const m = new THREE.Matrix4();
+  m.set(
+     R[0][0],  R[0][1], -R[0][2], 0,
+     R[1][0],  R[1][1], -R[1][2], 0,
+    -R[2][0], -R[2][1],  R[2][2], 0,
+     0,        0,        0,       1
+  );
+  m.setPosition(new THREE.Vector3(T[0], T[1], -T[2]));
+  return m;
+}
+
+// ═══════════════════════════════════════════════
+// ANCHOR — same logic as Step I, but now camera CAN move
+// ═══════════════════════════════════════════════
+function doAnchor(markerId, pose) {
+  const mk = MARKER_MAP[markerId];
+  if (!mk) return;
+
+  const markerInCam = posit2three(pose);
+  const markerToOrigin = new THREE.Matrix4().makeTranslation(-mk.ax, -mk.ay, -mk.az);
+  const modelInCam = new THREE.Matrix4().multiplyMatrices(markerInCam, markerToOrigin);
+
+  // Convert to world frame using current IMU
+  const camInWorld = new THREE.Matrix4().makeRotationFromQuaternion(imuToCamQuat());
+  // Camera is currently at ANCHOR.camPos in world (if we already had one), else origin.
+  // For initial anchor: camera at origin. For re-anchor after walking: we should
+  // ADD current camera position to the transform.
+  const camPosMat = new THREE.Matrix4().setPosition(ANCHOR.camPos);
+  const camPoseInWorld = new THREE.Matrix4().multiplyMatrices(camPosMat, camInWorld);
+  const modelInWorld = new THREE.Matrix4().multiplyMatrices(camPoseInWorld, modelInCam);
+
+  ANCHOR.modelMatrix.copy(modelInWorld);
+  ANCHOR.set = true;
+
+  // Save distance to scene (for OF scale)
+  const T = pose.bestTranslation;
+  ANCHOR.sceneDistance = Math.sqrt(T[0]*T[0]+T[1]*T[1]+T[2]*T[2]);
+
+  modelGroup.matrixAutoUpdate = false;
+  modelGroup.matrix.copy(ANCHOR.modelMatrix);
+  modelGroup.matrixWorldNeedsUpdate = true;
+  modelGroup.visible = true;
+}
+
+function updateCamera() {
+  if (!IMU.ready) return;
+  cam3.quaternion.copy(imuToCamQuat());
+  cam3.position.copy(ANCHOR.camPos);
+}
+
+// ═══════════════════════════════════════════════
+// OPTICAL FLOW → CAMERA TRANSLATION
+// ═══════════════════════════════════════════════
+//
+// Core idea:
+//   For each tracked feature, the observed flow (Δu, Δv) in pixels is a sum of:
+//     1. Flow due to camera ROTATION (we know this from IMU)
+//     2. Flow due to camera TRANSLATION (we want this)
+//   We subtract the rotation-induced flow to get the translation-only flow.
+//   Then we estimate translation in METRES via the scene depth (Z).
+//
+// For pure translation, a feature at pixel (u, v) on a plane at depth Z moves by:
+//     Δu = (fx · ΔX_cam + u · ΔZ_cam) / Z
+//     Δv = (fy · ΔY_cam + v · ΔZ_cam) / Z
+//
+// For small movements we can solve this for (ΔX, ΔY, ΔZ) using least squares
+// across all feature pairs. For simplicity in this step, we approximate with:
+//   - Assume ΔZ_cam ≈ 0 (no forward/backward motion). Only XY translation.
+//   - Then Δu = fx · ΔX / Z   →   ΔX = Z · Δu / fx
+//                             →   ΔY = Z · Δv / fy
+//   - Take median flow as robust estimate.
+//
+// Rotation compensation: from delta IMU quaternion, compute expected flow at
+// each feature and subtract.
+
+function computeTranslationFromFlow(flowVectors, focalPx) {
+  // flowVectors: array of {u, v, du, dv} in OF image coordinates (320×OF_H)
+  // u,v are relative to image CENTER (so u=0 is middle of image)
+  if (flowVectors.length < 8) return null;
+
+  // Median flow (robust against outliers)
+  const dus = flowVectors.map(f => f.du).sort((a,b)=>a-b);
+  const dvs = flowVectors.map(f => f.dv).sort((a,b)=>a-b);
+  const median_du = dus[Math.floor(dus.length/2)];
+  const median_dv = dvs[Math.floor(dvs.length/2)];
+
+  // Apply MAD outlier filter
+  const mad_u = dus.map(d => Math.abs(d - median_du)).sort((a,b)=>a-b);
+  const mad_v = dvs.map(d => Math.abs(d - median_dv)).sort((a,b)=>a-b);
+  const sigmau = mad_u[Math.floor(mad_u.length/2)] * 1.4826 || 1;
+  const sigmav = mad_v[Math.floor(mad_v.length/2)] * 1.4826 || 1;
+
+  let sumDu=0, sumDv=0, n=0;
+  for (const f of flowVectors) {
+    if (Math.abs(f.du - median_du) > 3*sigmau) continue;
+    if (Math.abs(f.dv - median_dv) > 3*sigmav) continue;
+    sumDu += f.du; sumDv += f.dv; n++;
+  }
+  if (n < 5) return null;
+  const meanDu = sumDu / n;
+  const meanDv = sumDv / n;
+
+  // Convert pixel flow to metres of camera translation.
+  // Flow in OF image pixels (320 wide). focalPx is in full-image pixels.
+  // Scale focalPx to OF resolution:
+  const focalPxOf = focalPx * (OF_W / video.videoWidth);
+
+  // ΔX_cam = -Z · Δu / fx   (negative because feature moves opposite to camera)
+  const Z = ANCHOR.sceneDistance;
+  const dX = -Z * meanDu / focalPxOf;
+  const dY = -Z * meanDv / focalPxOf;   // image-down direction in OF
+  // Convert image-Y (down positive) to math-Y (up positive): negate
+  // Actually camera Y in Three.js is "up", and image Y is "down". So when feature
+  // moves DOWN in image (du > 0... wait dv > 0 means down), it means camera moved UP.
+  // So dY_cam_world_up = +Z · dv / fy. But we already have minus from above.
+  // Let me redo: feature moves down → camera moved up → cam Y is +.
+  //   flow_dv > 0 means feature moved DOWN.
+  //   ΔY_cam (camera-up) = +Z · dv / fy → camera moved UP.
+  // But our formula gave dY = -Z·dv/f. So flip sign on dY.
+  return { dx: dX, dy: -dY, dz: 0 };
+}
+
+// Project flow expected from a pure rotation. We use IMU delta to compute
+// where each old feature should be in the new frame if NO translation happened.
+function rotationFlowAtPoint(u, v, focalPx, deltaQuat) {
+  // Backproject pixel to a direction in camera space (depth = 1)
+  // Camera intrinsics in OF resolution
+  const focalPxOf = focalPx * (OF_W / video.videoWidth);
+  const x = u / focalPxOf;
+  const y = -v / focalPxOf; // image down → camera up
+  const dir = new THREE.Vector3(x, y, -1).normalize();
+  // Rotate by deltaQuat⁻¹ to find where this direction was BEFORE rotation
+  // Actually: if camera rotates by Q from frame1 to frame2, a ray fixed in WORLD
+  // appears rotated by Q⁻¹ in camera space. So the new pixel position is the
+  // backprojection of Q⁻¹·dir.
+  const qInv = deltaQuat.clone().invert();
+  const newDir = dir.clone().applyQuaternion(qInv);
+  // Forward project. newDir.z should be negative (in front of camera)
+  if (newDir.z >= -0.001) return null;
+  const newU = -focalPxOf * newDir.x / newDir.z;
+  const newV =  focalPxOf * newDir.y / newDir.z; // flip back to image-down
+  return { u: newU, v: newV };
+}
+
+// ═══════════════════════════════════════════════
+// DRAW
+// ═══════════════════════════════════════════════
+function draw2D(markers, features, T) {
   overCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
 
-  for (const f of STATE.features) {
-    const vx = f.x * ofToVid;
-    const vy = f.y * ofToVid;
-    const sx = vx * T.scale + T.offX;
-    const sy = vy * T.scale + T.offY;
-
-    // Trail
-    if (STATE.showTrails && f.history && f.history.length > 1) {
-      overCtx.beginPath();
-      for (let i = 0; i < f.history.length; i++) {
-        const hx = f.history[i].x * ofToVid * T.scale + T.offX;
-        const hy = f.history[i].y * ofToVid * T.scale + T.offY;
-        if (i === 0) overCtx.moveTo(hx, hy);
-        else overCtx.lineTo(hx, hy);
-      }
-      overCtx.strokeStyle = 'rgba(26, 158, 92, 0.6)';
-      overCtx.lineWidth = 1.5;
-      overCtx.stroke();
+  // Optical flow points
+  if (STATE.showOF && features) {
+    const ofToVid = video.videoWidth / OF_W;
+    for (const f of features) {
+      const sx = f.x * ofToVid * T.scale + T.offX;
+      const sy = f.y * ofToVid * T.scale + T.offY;
+      overCtx.fillStyle = '#1a9e5c';
+      overCtx.beginPath(); overCtx.arc(sx, sy, 3, 0, Math.PI*2); overCtx.fill();
     }
+  }
 
-    // Point
-    overCtx.fillStyle = '#1a9e5c';
-    overCtx.beginPath();
-    overCtx.arc(sx, sy, 3.5, 0, Math.PI*2);
-    overCtx.fill();
-    overCtx.strokeStyle = 'rgba(0,0,0,.5)';
-    overCtx.lineWidth = 1;
-    overCtx.stroke();
+  // Markers
+  if (STATE.showMarkers && markers) {
+    for (const m of markers) {
+      const pts = m.corners.map(c => ({ x:c.x*T.scale+T.offX, y:c.y*T.scale+T.offY }));
+      overCtx.beginPath();
+      overCtx.moveTo(pts[0].x, pts[0].y);
+      for (let i=1; i<4; i++) overCtx.lineTo(pts[i].x, pts[i].y);
+      overCtx.closePath();
+      overCtx.strokeStyle = MARKER_MAP[m.id] ? '#1a9e5c' : '#f0a500';
+      overCtx.lineWidth = 3; overCtx.stroke();
+    }
   }
 }
 
 // ═══════════════════════════════════════════════
 // MAIN LOOP
 // ═══════════════════════════════════════════════
+let lastDetect = 0;
+const ARUCO_INTERVAL = 200; // ms — slower than OF
+const OF_INTERVAL = 80;
+
 function detectFeatures(gray) {
-  const corners = detectShiTomasi(gray, OF_W, OF_H, {
-    winSize: 4,
-    minScore: 5,
-    minDist: 14,
-    maxFeats: 80,
-    skip: 4,
-  });
-  return corners.map(c => ({
-    x: c.x, y: c.y, age: 0, history: [{x:c.x, y:c.y}]
-  }));
+  const c = detectShiTomasi(gray, OF_W, OF_H, { winSize:4, minScore:5, minDist:14, maxFeats:80, skip:4 });
+  return c.map(p => ({ x:p.x, y:p.y, age:0 }));
 }
 
 function loop(now) {
   requestAnimationFrame(loop);
-  if (!STATE.camOk) return;
-  if (now - STATE.lastT < 80) return; // ~12fps target
+  if (!STATE.camOk || !STATE.threeOk) return;
+  if (now - STATE.lastT < OF_INTERVAL) {
+    renderer.render(scene, cam3); return;
+  }
   STATE.lastT = now;
 
-  // Draw downscaled video frame
+  // ── Grab downscaled grayscale frame ──
   workCtx.drawImage(video, 0, 0, OF_W, OF_H);
   const img = workCtx.getImageData(0, 0, OF_W, OF_H);
   const gray = rgbaToGray(img.data, OF_W, OF_H);
 
-  // First frame: just detect features
-  if (!STATE.prevGray) {
-    STATE.prevGray = gray;
-    STATE.features = detectFeatures(gray);
-    setStatus(`Inizio tracking — ${STATE.features.length} feature`);
-    return;
-  }
+  // ── ARUCO DETECTION (slower cadence, full resolution) ──
+  let markers = null;
+  if (now - lastDetect >= ARUCO_INTERVAL && detector) {
+    lastDetect = now;
+    work.width = video.videoWidth; work.height = video.videoHeight;
+    workCtx.drawImage(video, 0, 0);
+    try {
+      const fullImg = workCtx.getImageData(0, 0, video.videoWidth, video.videoHeight);
+      markers = detector.detect(fullImg);
+    } catch(e) {}
+    // Restore OF working size
+    work.width = OF_W; work.height = OF_H;
+    workCtx.drawImage(video, 0, 0, OF_W, OF_H);
 
-  // Track existing features
-  let avgFx = 0, avgFy = 0, nOk = 0, lostThisFrame = 0;
-  if (STATE.features.length > 0) {
-    const tracked = trackLK(STATE.prevGray, gray, STATE.features, OF_W, OF_H, {
-      winRadius: 4, maxIter: 8, maxResidual: 40,
-    });
-    const newFeatures = [];
-    for (let i = 0; i < tracked.length; i++) {
-      const t = tracked[i];
-      const old = STATE.features[i];
-      if (t.ok) {
-        const flowX = t.x - old.x;
-        const flowY = t.y - old.y;
-        avgFx += flowX; avgFy += flowY; nOk++;
-        old.x = t.x; old.y = t.y; old.age = (old.age||0) + 1;
-        old.history.push({ x: t.x, y: t.y });
-        if (old.history.length > 20) old.history.shift();
-        newFeatures.push(old);
-      } else {
-        lostThisFrame++;
+    // POSIT on first known marker → re-anchor
+    if (markers && markers.length) {
+      let used = null;
+      for (const m of markers) if (MARKER_MAP[m.id]) { used = m; break; }
+      if (used) {
+        const focalPx = video.videoWidth * 0.85;
+        if (!posit) posit = new POS.Posit(MARKER_SIZE_M, focalPx);
+        const corners = used.corners.map(c => ({ x: c.x - video.videoWidth/2, y: video.videoHeight/2 - c.y }));
+        try {
+          const pose = posit.pose(corners);
+          if (pose) {
+            // First time → set anchor. After that → keep refining.
+            doAnchor(used.id, pose);
+            document.getElementById('i-id').textContent =
+              `${used.id} (${MARKER_MAP[used.id].name})`;
+            const vFov = 2*Math.atan((video.videoHeight/2)/focalPx)*180/Math.PI;
+            if (Math.abs(cam3.fov - vFov) > 0.5) {
+              cam3.fov = vFov; cam3.updateProjectionMatrix();
+            }
+          }
+        } catch(e) {}
       }
     }
-    STATE.features = newFeatures;
-    STATE.lostTotal += lostThisFrame;
   }
 
-  // Periodic re-detection if we're losing features
+  // ── OPTICAL FLOW TRACKING ──
+  let trackedFeatures = [];
+  let flowVectors = [];
+  if (STATE.prevGray && STATE.features.length > 0) {
+    const tracked = trackLK(STATE.prevGray, gray, STATE.features, OF_W, OF_H, {
+      winRadius:4, maxIter:8, maxResidual:40
+    });
+    const next = [];
+    for (let i = 0; i < tracked.length; i++) {
+      if (tracked[i].ok) {
+        const old = STATE.features[i];
+        const du = tracked[i].x - old.x;
+        const dv = tracked[i].y - old.y;
+        // Pixel coords relative to image center (for translation estimation)
+        flowVectors.push({
+          u: old.x - OF_W/2,
+          v: old.y - OF_H/2,
+          du, dv
+        });
+        next.push({ x: tracked[i].x, y: tracked[i].y, age: (old.age||0)+1 });
+      }
+    }
+    trackedFeatures = next;
+  }
+  STATE.features = trackedFeatures;
+
+  // Re-detect periodically or when low
   STATE.redetectCounter++;
   if (STATE.features.length < 30 || STATE.redetectCounter >= 30) {
     STATE.redetectCounter = 0;
-    // Detect new features and merge (avoiding existing positions)
     const newSet = detectFeatures(gray);
-    const existing = STATE.features;
-    const minDist2 = 14*14;
+    const md2 = 14*14;
     for (const nf of newSet) {
-      let tooClose = false;
-      for (const ef of existing) {
-        const dx = nf.x - ef.x, dy = nf.y - ef.y;
-        if (dx*dx + dy*dy < minDist2) { tooClose = true; break; }
+      let tc = false;
+      for (const ef of STATE.features) {
+        const dx=nf.x-ef.x, dy=nf.y-ef.y;
+        if (dx*dx+dy*dy < md2) { tc=true; break; }
       }
-      if (!tooClose && existing.length < 80) existing.push(nf);
+      if (!tc && STATE.features.length < 80) STATE.features.push(nf);
     }
   }
 
-  // Update UI
-  document.getElementById('i-n').textContent = STATE.features.length;
-  document.getElementById('i-lost').textContent = STATE.lostTotal;
-  if (nOk > 0) {
-    avgFx /= nOk; avgFy /= nOk;
-    document.getElementById('i-flow').textContent =
-      `Δx ${avgFx.toFixed(1)}  Δy ${avgFy.toFixed(1)}`;
-  }
+  // ── ESTIMATE CAMERA TRANSLATION ──
+  if (ANCHOR.set && flowVectors.length > 8 && STATE.prevImuQuat && IMU.ready) {
+    const focalPx = video.videoWidth * 0.85;
+    const curImuQuat = imuToCamQuat();
 
-  // Draw on overlay
+    // Subtract rotation-induced flow
+    const deltaQ = curImuQuat.clone().multiply(STATE.prevImuQuat.clone().invert());
+    const residualFlow = [];
+    for (const fv of flowVectors) {
+      const expected = rotationFlowAtPoint(fv.u, fv.v, focalPx, deltaQ);
+      if (!expected) continue;
+      // Expected NEW pixel position is expected.u/v. Original was (fv.u, fv.v).
+      // So expected du = expected.u - fv.u
+      const rotDu = expected.u - fv.u;
+      const rotDv = expected.v - fv.v;
+      residualFlow.push({
+        u: fv.u, v: fv.v,
+        du: fv.du - rotDu,
+        dv: fv.dv - rotDv,
+      });
+    }
+
+    const trans = computeTranslationFromFlow(residualFlow, focalPx);
+    if (trans) {
+      // Translation is in CAMERA frame (X right, Y up, Z forward in camera).
+      // Convert to WORLD frame by rotating with camera orientation.
+      const transVec = new THREE.Vector3(trans.dx, trans.dy, trans.dz);
+      transVec.applyQuaternion(curImuQuat);
+      // Small clamping: skip implausibly large jumps (>20cm/frame)
+      if (transVec.length() < 0.2) {
+        ANCHOR.camPos.add(transVec);
+      }
+      document.getElementById('i-trans').textContent =
+        `Δx${trans.dx.toFixed(3)} Δy${trans.dy.toFixed(3)}`;
+    }
+  }
+  STATE.prevImuQuat = IMU.ready ? imuToCamQuat() : null;
+
+  // ── UPDATE CAMERA ──
+  updateCamera();
+
+  // ── RENDER ──
   const T = getCoverTransform(video.videoWidth, video.videoHeight);
-  drawFeatures(T);
-
-  // FPS
-  STATE.frames++;
-  if (now - STATE.fpsT > 1000) {
-    STATE.fps = STATE.frames;
-    STATE.frames = 0; STATE.fpsT = now;
-    document.getElementById('i-fps').textContent = STATE.fps;
-  }
+  draw2D(markers, STATE.features, T);
+  renderer.render(scene, cam3);
 
   STATE.prevGray = gray;
 
-  if (STATE.features.length > 0) {
-    setStatus(`Tracking ${STATE.features.length} feature attivi`);
+  // ── UI ──
+  document.getElementById('i-of').textContent = STATE.features.length;
+  document.getElementById('i-pos').textContent =
+    `${ANCHOR.camPos.x.toFixed(2)} ${ANCHOR.camPos.y.toFixed(2)} ${ANCHOR.camPos.z.toFixed(2)}`;
+  document.getElementById('i-state').textContent = ANCHOR.set ? 'TRACKING' : 'cerca marker';
+  if (ANCHOR.set) setStatus('Tracking attivo — cammina lentamente', 'anchored');
+  else setStatus('Inquadra un marker per ancorare', 'searching');
+
+  STATE.frames++;
+  if (now - STATE.fpsT > 1000) {
+    STATE.fps = STATE.frames; STATE.frames = 0; STATE.fpsT = now;
+    document.getElementById('i-fps').textContent = STATE.fps;
   }
 }
 
@@ -473,27 +2814,50 @@ function loop(now) {
 // BOOT
 // ═══════════════════════════════════════════════
 document.getElementById('btn-start').addEventListener('click', async () => {
+  const sizeMm = parseFloat(document.getElementById('marker-size').value);
+  if (sizeMm > 0) MARKER_SIZE_M = sizeMm / 1000;
   document.getElementById('splash').style.display = 'none';
   resizeOverlay();
+
+  if (typeof AR === 'undefined' || typeof POS === 'undefined' || typeof THREE === 'undefined') {
+    setStatus('ERR libreria non caricata'); return;
+  }
+  detector = new AR.Detector();
+  initThree();
   const ok = await startCamera();
   if (!ok) return;
-  setStatus('Camera OK — inizio detection');
+
+  const needsPerm = typeof DeviceOrientationEvent !== 'undefined' &&
+                    typeof DeviceOrientationEvent.requestPermission === 'function';
+  if (needsPerm) {
+    document.getElementById('perm-modal').classList.add('show');
+  } else {
+    await requestGyro();
+    setStatus('Inquadra un marker per ancorare', 'searching');
+  }
   requestAnimationFrame(loop);
 });
 
-document.getElementById('tb-trails').addEventListener('click', () => {
-  STATE.showTrails = !STATE.showTrails;
-  document.getElementById('tb-trails').classList.toggle('on', STATE.showTrails);
+document.getElementById('btn-gyro').addEventListener('click', async () => {
+  document.getElementById('perm-modal').classList.remove('show');
+  const ok = await requestGyro();
+  setStatus(ok ? 'Inquadra un marker per ancorare' : 'Giroscopio negato', ok?'searching':'searching');
 });
 
-document.getElementById('tb-reset').addEventListener('click', () => {
-  STATE.features = [];
-  STATE.prevGray = null;
-  STATE.lostTotal = 0;
-  setStatus('Reset — re-detection al prossimo frame');
+document.getElementById('tb-of').addEventListener('click', () => {
+  STATE.showOF = !STATE.showOF;
+  document.getElementById('tb-of').classList.toggle('on', STATE.showOF);
 });
-
-window.addEventListener('resize', resizeOverlay);
+document.getElementById('tb-markers').addEventListener('click', () => {
+  STATE.showMarkers = !STATE.showMarkers;
+  document.getElementById('tb-markers').classList.toggle('on', STATE.showMarkers);
+});
+document.getElementById('tb-reanchor').addEventListener('click', () => {
+  ANCHOR.set = false;
+  ANCHOR.camPos.set(0,0,0);
+  modelGroup.visible = false;
+  setStatus('Re-anchor: inquadra di nuovo un marker', 'searching');
+});
 </script>
 </body>
 </html>
