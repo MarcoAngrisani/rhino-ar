@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Rhino AR</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --ink: #0a0a0f;
+    --paper: #f5f2eb;
+    --accent: #e8410a;
+    --ok: #1a9e5c;
+    --warn: #f0a500;
+    --glass: rgba(10,10,15,0.72);
+    --font-mono: 'Courier New', monospace;
+  }
+
+  body {
+    background: var(--ink);
+    color: var(--paper);
+    font-family: var(--font-mono);
+    overflow: hidden;
+    height: 100dvh;
+    width: 100vw;
+  }
+
+  /* ── SPLASH ── */
+  #splash {
+    position: fixed; inset: 0; z-index: 100;
+    background: var(--ink);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 2rem; padding: 2rem;
+    transition: opacity .5s;
+  }
+  #splash h1 {
+    font-size: clamp(2rem, 8vw, 3.5rem);
+    letter-spacing: -.03em;
+    text-transform: uppercase;
+    line-height: 1;
+  }
+  #splash h1 span { color: var(--accent); }
+  #splash p { font-size: .85rem; opacity: .6; text-align: center; max-width: 300px; }
+  #splash button {
+    background: var(--accent);
+    color: var(--paper);
+    border: none;
+    padding: .9rem 2.4rem;
+    font-family: var(--font-mono);
+    font-size: 1rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: transform .15s, background .15s;
+  }
+  #splash button:active { transform: scale(.96); }
+
+  /* ── CAMERA ── */
+  #cam { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  #canvas3d { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+  /* ── HUD ── */
+  #hud {
+    position: fixed; inset: 0; pointer-events: none;
+    display: flex; flex-direction: column; justify-content: space-between;
+    padding: 1rem;
+  }
+
+  #status-bar {
+    pointer-events: none;
+    display: flex; align-items: center; gap: .6rem;
+    background: var(--glass);
+    backdrop-filter: blur(8px);
+    padding: .5rem .9rem;
+    border-left: 3px solid var(--accent);
+    font-size: .72rem;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    max-width: max-content;
+  }
+  #status-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--warn);
+    transition: background .3s;
+    flex-shrink: 0;
+  }
+  #status-dot.ok { background: var(--ok); }
+  #status-dot.scan { background: var(--accent); animation: pulse .6s infinite alternate; }
+  @keyframes pulse { to { opacity: .2; } }
+
+  /* QR crosshair */
+  #crosshair {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    width: 180px; height: 180px;
+    pointer-events: none;
+    opacity: .5;
+  }
+  #crosshair::before, #crosshair::after {
+    content: '';
+    position: absolute;
+    background: var(--paper);
+  }
+  .ch-corner {
+    position: absolute;
+    width: 24px; height: 24px;
+    border-color: var(--paper);
+    border-style: solid;
+    opacity: .7;
+  }
+  .ch-corner.tl { top: 0; left: 0; border-width: 2px 0 0 2px; }
+  .ch-corner.tr { top: 0; right: 0; border-width: 2px 2px 0 0; }
+  .ch-corner.bl { bottom: 0; left: 0; border-width: 0 0 2px 2px; }
+  .ch-corner.br { bottom: 0; right: 0; border-width: 0 2px 2px 0; }
+
+  /* bottom toolbar */
+  #toolbar {
+    pointer-events: all;
+    display: flex; gap: .6rem; justify-content: center;
+  }
+  .tb-btn {
+    background: var(--glass);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(245,242,235,.15);
+    color: var(--paper);
+    font-family: var(--font-mono);
+    font-size: .72rem;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    padding: .7rem 1.2rem;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tb-btn:active { background: rgba(232,65,10,.25); border-color: var(--accent); }
+  .tb-btn.active { border-color: var(--accent); color: var(--accent); }
+
+  /* element info card */
+  #info-card {
+    position: fixed;
+    bottom: 5rem; left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--glass);
+    backdrop-filter: blur(12px);
+    border-left: 3px solid var(--ok);
+    padding: .8rem 1.2rem;
+    min-width: 220px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .3s, transform .3s;
+  }
+  #info-card.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+  #info-card .el-id { font-size: .65rem; opacity: .5; letter-spacing: .1em; text-transform: uppercase; }
+  #info-card .el-type { font-size: 1.1rem; font-weight: bold; margin: .1rem 0; }
+  #info-card .el-coords { font-size: .7rem; opacity: .6; }
+
+  /* element list */
+  #el-list {
+    position: fixed;
+    top: 4rem; right: 0;
+    width: min(280px, 80vw);
+    background: var(--glass);
+    backdrop-filter: blur(12px);
+    border-left: 1px solid rgba(245,242,235,.1);
+    max-height: 60vh;
+    overflow-y: auto;
+    transform: translateX(100%);
+    transition: transform .3s;
+    pointer-events: all;
+  }
+  #el-list.open { transform: translateX(0); }
+  #el-list h3 {
+    font-size: .7rem; letter-spacing: .1em; text-transform: uppercase;
+    padding: .8rem 1rem; border-bottom: 1px solid rgba(245,242,235,.1);
+    color: var(--accent);
+  }
+  .el-row {
+    display: flex; align-items: center; gap: .6rem;
+    padding: .55rem 1rem;
+    border-bottom: 1px solid rgba(245,242,235,.06);
+    font-size: .72rem;
+  }
+  .el-row .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: rgba(245,242,235,.2); flex-shrink: 0;
+    transition: background .3s;
+  }
+  .el-row.scanned .dot { background: var(--ok); }
+  .el-row .name { opacity: .8; flex: 1; }
+  .el-row .type-tag {
+    font-size: .6rem; opacity: .4; text-transform: uppercase; letter-spacing: .05em;
+  }
+
+  /* flash overlay */
+  #flash {
+    position: fixed; inset: 0;
+    background: var(--ok);
+    opacity: 0; pointer-events: none;
+    transition: opacity .1s;
+  }
+  #flash.go { opacity: .25; }
+
+  /* debug panel */
+  #debug {
+    position: fixed; top: 4rem; left: 1rem;
+    background: var(--glass);
+    backdrop-filter: blur(8px);
+    padding: .6rem .8rem;
+    font-size: .62rem; opacity: .7;
+    line-height: 1.6;
+    display: none;
+  }
+  #debug.show { display: block; }
+</style>
+</head>
+<body>
+
+<!-- SPLASH -->
+<div id="splash">
+  <h1>RHINO<br><span>AR</span></h1>
+  <p>Inquadra i QR code in cantiere per ancorare il modello nello spazio</p>
+  <button id="start-btn">AVVIA CAMERA</button>
+</div>
+
+<!-- CAMERA + 3D -->
+<video id="cam" autoplay playsinline muted></video>
+<canvas id="canvas3d"></canvas>
+<canvas id="qr-canvas" style="display:none"></canvas>
+
+<!-- HUD -->
+<div id="hud">
+  <div id="status-bar">
+    <div id="status-dot"></div>
+    <span id="status-text">In attesa di permessi</span>
+  </div>
+
+  <div id="toolbar">
+    <button class="tb-btn" id="btn-list">ELEMENTI</button>
+    <button class="tb-btn" id="btn-scan">SCAN QR</button>
+    <button class="tb-btn" id="btn-reset">RESET</button>
+    <button class="tb-btn" id="btn-debug">DBG</button>
+  </div>
+</div>
+
+<!-- QR crosshair -->
+<div id="crosshair">
+  <div class="ch-corner tl"></div>
+  <div class="ch-corner tr"></div>
+  <div class="ch-corner bl"></div>
+  <div class="ch-corner br"></div>
+</div>
+
+<!-- Info card -->
+<div id="info-card">
+  <div class="el-id" id="ic-id">—</div>
+  <div class="el-type" id="ic-type">—</div>
+  <div class="el-coords" id="ic-coords">—</div>
+</div>
+
+<!-- Element list -->
+<div id="el-list">
+  <h3>Elementi modello</h3>
+  <div id="el-list-body"></div>
+</div>
+
+<!-- Flash -->
+<div id="flash"></div>
+
+<!-- Debug -->
+<div id="debug" id="debug-panel">
+  <div id="dbg-pos">pos: —</div>
+  <div id="dbg-rot">rot: —</div>
+  <div id="dbg-anchor">anchor: —</div>
+  <div id="dbg-qr">qr: —</div>
+</div>
+
+<!-- three.js CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<!-- jsQR -->
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+
+<script>
+// ═══════════════════════════════════════════════
+//  MODEL DATA — JSON di test (sostituibile con export Rhino)
+// ═══════════════════════════════════════════════
+const MODEL = {
+  name: "Edificio Test",
+  unit: "m",
+  origin: { x: 0, y: 0, z: 0 },
+  elements: [
+    // Pilastri (x, y = pianta; z = base; h = altezza)
+    { id: "PIL-A1", type: "column", x: 0,   y: 0,   z: 0, h: 3.2, r: 0.2 },
+    { id: "PIL-A2", type: "column", x: 5,   y: 0,   z: 0, h: 3.2, r: 0.2 },
+    { id: "PIL-B1", type: "column", x: 0,   y: 4,   z: 0, h: 3.2, r: 0.2 },
+    { id: "PIL-B2", type: "column", x: 5,   y: 4,   z: 0, h: 3.2, r: 0.2 },
+    // Travi
+    { id: "TRV-1",  type: "beam",   x1: 0, y1: 0, x2: 5, y2: 0, z: 3.2, w: 0.3, h: 0.5 },
+    { id: "TRV-2",  type: "beam",   x1: 0, y1: 4, x2: 5, y2: 4, z: 3.2, w: 0.3, h: 0.5 },
+    { id: "TRV-3",  type: "beam",   x1: 0, y1: 0, x2: 0, y2: 4, z: 3.2, w: 0.3, h: 0.5 },
+    // Parete
+    { id: "PAR-1",  type: "wall",   x1: 5, y1: 0, x2: 5, y2: 4, z: 0, h: 3.2, t: 0.2 },
+  ]
+};
+
+// QR anchor points — ogni QR conosce la sua posizione nel modello
+// (in produzione questi dati sono embedded nel QR stesso)
+const QR_ANCHORS = {
+  "RHINO_AR:PIL-A1:0,0,0":  { id: "PIL-A1", wx: 0, wy: 0, wz: 0 },
+  "RHINO_AR:PIL-A2:5,0,0":  { id: "PIL-A2", wx: 5, wy: 0, wz: 0 },
+  "RHINO_AR:PIL-B1:0,4,0":  { id: "PIL-B1", wx: 0, wy: 4, wz: 0 },
+  "RHINO_AR:PIL-B2:5,4,0":  { id: "PIL-B2", wx: 5, wy: 4, wz: 0 },
+  // Fallback per test rapido: qualsiasi testo con coordinate
+  "TEST_QR_A1": { id: "PIL-A1", wx: 0, wy: 0, wz: 0 },
+  "TEST_QR_A2": { id: "PIL-A2", wx: 5, wy: 0, wz: 0 },
+};
+
+// ═══════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════
+const state = {
+  camReady: false,
+  oriented: false,
+  // camera world position (metres, model space)
+  pos: { x: 0, y: -2, z: 1.7 }, // default: 2m dal punto zero, altezza occhi
+  // camera orientation from IMU
+  alpha: 0, beta: 0, gamma: 0,
+  // anchor: last QR scan
+  anchor: null,
+  scannedIds: new Set(),
+  scanning: false,
+  debugMode: false,
+  listOpen: false,
+};
+
+// ═══════════════════════════════════════════════
+//  THREE.JS SETUP
+// ═══════════════════════════════════════════════
+let renderer, scene, camera3d, modelGroup;
+
+function initThree() {
+  const canvas = document.getElementById('canvas3d');
+  renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setClearColor(0x000000, 0);
+
+  scene = new THREE.Scene();
+
+  // FOV approssimato per iPhone — calibrabile
+  camera3d = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.05, 200);
+  camera3d.position.set(0, 0, 0);
+
+  // Lights
+  scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+  const dir = new THREE.DirectionalLight(0xffffff, 0.6);
+  dir.position.set(5, 10, 5);
+  scene.add(dir);
+
+  // Model group
+  modelGroup = new THREE.Group();
+  scene.add(modelGroup);
+
+  buildModel();
+  window.addEventListener('resize', onResize);
+}
+
+// Colors per tipo
+const MAT = {
+  column: new THREE.MeshPhongMaterial({ color: 0x4a9eff, opacity: 0.55, transparent: true, wireframe: false }),
+  beam:   new THREE.MeshPhongMaterial({ color: 0xff9a2e, opacity: 0.55, transparent: true }),
+  wall:   new THREE.MeshPhongMaterial({ color: 0xf5f2eb, opacity: 0.20, transparent: true }),
+  column_scanned: new THREE.MeshPhongMaterial({ color: 0x1a9e5c, opacity: 0.75, transparent: true }),
+  beam_scanned:   new THREE.MeshPhongMaterial({ color: 0x1a9e5c, opacity: 0.75, transparent: true }),
+  wall_scanned:   new THREE.MeshPhongMaterial({ color: 0x1a9e5c, opacity: 0.40, transparent: true }),
+};
+
+const meshMap = {}; // id → mesh
+
+function buildModel() {
+  modelGroup.clear();
+
+  MODEL.elements.forEach(el => {
+    let mesh;
+
+    if (el.type === 'column') {
+      const geo = new THREE.CylinderGeometry(el.r, el.r, el.h, 12);
+      mesh = new THREE.Mesh(geo, MAT.column.clone());
+      mesh.position.set(el.x, el.z + el.h / 2, -el.y); // Three.js: Y=up, Z=into screen; Rhino: Z=up, Y=forward
+      // wireframe edge
+      const edges = new THREE.EdgesGeometry(geo);
+      const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x4a9eff, opacity: 0.8, transparent: true }));
+      mesh.add(line);
+
+    } else if (el.type === 'beam') {
+      const dx = el.x2 - el.x1, dy = el.y2 - el.y1;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      const geo = new THREE.BoxGeometry(len, el.h, el.w);
+      mesh = new THREE.Mesh(geo, MAT.beam.clone());
+      const cx = (el.x1 + el.x2) / 2;
+      const cy = (el.y1 + el.y2) / 2;
+      mesh.position.set(cx, el.z + el.h / 2, -cy);
+      mesh.rotation.y = Math.atan2(dy, dx); // align along beam direction
+      const edges = new THREE.EdgesGeometry(geo);
+      const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xff9a2e, opacity: 0.8, transparent: true }));
+      mesh.add(line);
+
+    } else if (el.type === 'wall') {
+      const dx = el.x2 - el.x1, dy = el.y2 - el.y1;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      const geo = new THREE.BoxGeometry(len, el.h, el.t);
+      mesh = new THREE.Mesh(geo, MAT.wall.clone());
+      const cx = (el.x1 + el.x2) / 2;
+      const cy = (el.y1 + el.y2) / 2;
+      mesh.position.set(cx, el.z + el.h / 2, -cy);
+      mesh.rotation.y = Math.atan2(dy, dx);
+      const edges = new THREE.EdgesGeometry(geo);
+      const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xf5f2eb, opacity: 0.5, transparent: true }));
+      mesh.add(line);
+    }
+
+    if (mesh) {
+      mesh.userData.elId = el.id;
+      mesh.userData.type = el.type;
+      modelGroup.add(mesh);
+      meshMap[el.id] = mesh;
+    }
+  });
+
+  // Reference grid (floor)
+  const gridHelper = new THREE.GridHelper(20, 20, 0x333333, 0x222222);
+  gridHelper.position.y = 0;
+  modelGroup.add(gridHelper);
+}
+
+function markScanned(id) {
+  state.scannedIds.add(id);
+  const mesh = meshMap[id];
+  if (!mesh) return;
+  const t = mesh.userData.type;
+  const mat = MAT[t + '_scanned'];
+  if (mat) mesh.material = mat.clone();
+}
+
+function onResize() {
+  if (!renderer) return;
+  camera3d.aspect = window.innerWidth / window.innerHeight;
+  camera3d.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+// ═══════════════════════════════════════════════
+//  IMU ORIENTATION
+// ═══════════════════════════════════════════════
+let imuGranted = false;
+
+function initIMU() {
+  const handler = (e) => {
+    if (e.alpha === null) return;
+    state.alpha = e.alpha;
+    state.beta  = e.beta;
+    state.gamma = e.gamma;
+    state.oriented = true;
+    setStatus('ok', 'In tracking');
+  };
+
+  if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+    // iOS 13+
+    DeviceOrientationEvent.requestPermission().then(r => {
+      if (r === 'granted') { window.addEventListener('deviceorientation', handler, true); imuGranted = true; }
+    }).catch(() => setStatus('warn', 'Giroscopio non disponibile'));
+  } else {
+    window.addEventListener('deviceorientation', handler, true);
+    imuGranted = true;
+  }
+}
+
+// Convert IMU Euler to Three.js camera quaternion
+// Coordinate system: Rhino X→right, Y→forward, Z→up
+//                    Three X→right, Y→up, Z→toward viewer
+function imuToQuaternion(alpha, beta, gamma) {
+  // alpha: compass heading (yaw around Z)
+  // beta:  tilt forward/back (pitch around X)
+  // gamma: tilt left/right (roll around Y)
+  const a = THREE.MathUtils.degToRad(alpha);
+  const b = THREE.MathUtils.degToRad(beta);
+  const g = THREE.MathUtils.degToRad(gamma);
+
+  const ea = new THREE.Euler(b, -a, -g, 'YXZ');
+  return new THREE.Quaternion().setFromEuler(ea);
+}
+
+// ═══════════════════════════════════════════════
+//  CAMERA STREAM
+// ═══════════════════════════════════════════════
+const video = document.getElementById('cam');
+const qrCanvas = document.getElementById('qr-canvas');
+const qrCtx = qrCanvas.getContext('2d', { willReadFrequently: true });
+
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
+    state.camReady = true;
+    qrCanvas.width = video.videoWidth || 640;
+    qrCanvas.height = video.videoHeight || 480;
+    setStatus('warn', 'Inquadra un QR code');
+    initIMU();
+    requestAnimationFrame(loop);
+  } catch(e) {
+    setStatus('err', 'Camera non disponibile');
+    console.error(e);
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  QR SCANNING
+// ═══════════════════════════════════════════════
+let lastQRTime = 0;
+const QR_INTERVAL = 400; // ms between scans
+
+function scanQR(now) {
+  if (!state.scanning) return;
+  if (now - lastQRTime < QR_INTERVAL) return;
+  lastQRTime = now;
+  if (!video.videoWidth) return;
+
+  qrCanvas.width = video.videoWidth;
+  qrCanvas.height = video.videoHeight;
+  qrCtx.drawImage(video, 0, 0);
+  const imgData = qrCtx.getImageData(0, 0, qrCanvas.width, qrCanvas.height);
+  const code = jsQR(imgData.data, imgData.width, imgData.height, { inversionAttempts: 'dontInvert' });
+
+  if (code) {
+    document.getElementById('dbg-qr').textContent = 'qr: ' + code.data;
+    handleQR(code.data);
+  }
+}
+
+function handleQR(data) {
+  // Try exact match first
+  let anchor = QR_ANCHORS[data];
+
+  // Try parsing format "RHINO_AR:ID:x,y,z"
+  if (!anchor && data.startsWith('RHINO_AR:')) {
+    const parts = data.split(':');
+    if (parts.length === 3) {
+      const id = parts[1];
+      const coords = parts[2].split(',').map(Number);
+      if (coords.length === 3 && !coords.some(isNaN)) {
+        anchor = { id, wx: coords[0], wy: coords[1], wz: coords[2] };
+        QR_ANCHORS[data] = anchor; // cache
+      }
+    }
+  }
+
+  if (!anchor) {
+    setStatus('warn', 'QR non riconosciuto');
+    return;
+  }
+
+  // Set camera world position based on QR anchor
+  // Assumption: when you scan a QR at floor level, you're ~0.5m away and ~1.7m up
+  // In a real scenario, we'd use the QR code perspective for distance estimation
+  // For PoC: anchor just tells us "you're near this element"
+  state.pos = {
+    x: anchor.wx - 0.5, // slight offset (standing in front)
+    y: anchor.wz + 1.7, // eye height
+    z: anchor.wy + 0.5
+  };
+  state.anchor = anchor;
+
+  // Flash + mark scanned
+  flash();
+  markScanned(anchor.id);
+  updateList();
+  showInfoCard(anchor.id);
+  setStatus('ok', `Ancorato: ${anchor.id}`);
+
+  document.getElementById('dbg-anchor').textContent =
+    `anchor: ${anchor.id} (${anchor.wx},${anchor.wy},${anchor.wz})`;
+}
+
+function flash() {
+  const el = document.getElementById('flash');
+  el.classList.add('go');
+  setTimeout(() => el.classList.remove('go'), 200);
+}
+
+// ═══════════════════════════════════════════════
+//  RENDER LOOP
+// ═══════════════════════════════════════════════
+function loop(now) {
+  requestAnimationFrame(loop);
+  scanQR(now);
+  updateCamera();
+  renderer.render(scene, camera3d);
+  updateDebug();
+}
+
+function updateCamera() {
+  if (!state.camReady) return;
+
+  // Position
+  camera3d.position.set(
+    state.pos.x,
+    state.pos.y,
+    -state.pos.z  // Rhino Y → Three -Z
+  );
+
+  // Orientation from IMU
+  if (state.oriented) {
+    const q = imuToQuaternion(state.alpha, state.beta, state.gamma);
+    camera3d.quaternion.copy(q);
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  UI HELPERS
+// ═══════════════════════════════════════════════
+function setStatus(type, text) {
+  const dot = document.getElementById('status-dot');
+  const label = document.getElementById('status-text');
+  dot.className = '';
+  if (type === 'ok') dot.classList.add('ok');
+  if (type === 'scan') dot.classList.add('scan');
+  label.textContent = text;
+}
+
+function showInfoCard(id) {
+  const el = MODEL.elements.find(e => e.id === id);
+  if (!el) return;
+  document.getElementById('ic-id').textContent = el.id;
+  document.getElementById('ic-type').textContent = el.type.toUpperCase();
+  const coords = el.type === 'column'
+    ? `x:${el.x}m  y:${el.y}m  z:${el.z}m`
+    : `x1:${el.x1}m  y1:${el.y1}m → x2:${el.x2}m  y2:${el.y2}m`;
+  document.getElementById('ic-coords').textContent = coords;
+  const card = document.getElementById('info-card');
+  card.classList.add('show');
+  setTimeout(() => card.classList.remove('show'), 4000);
+}
+
+function buildList() {
+  const body = document.getElementById('el-list-body');
+  body.innerHTML = '';
+  MODEL.elements.forEach(el => {
+    const row = document.createElement('div');
+    row.className = 'el-row';
+    row.id = 'row-' + el.id;
+    row.innerHTML = `<div class="dot"></div><div class="name">${el.id}</div><div class="type-tag">${el.type}</div>`;
+    body.appendChild(row);
+  });
+}
+
+function updateList() {
+  state.scannedIds.forEach(id => {
+    const row = document.getElementById('row-' + id);
+    if (row) row.classList.add('scanned');
+  });
+}
+
+function updateDebug() {
+  if (!state.debugMode) return;
+  document.getElementById('dbg-pos').textContent =
+    `pos: x${state.pos.x.toFixed(2)} y${state.pos.y.toFixed(2)} z${state.pos.z.toFixed(2)}`;
+  document.getElementById('dbg-rot').textContent =
+    `rot: α${state.alpha.toFixed(0)}° β${state.beta.toFixed(0)}° γ${state.gamma.toFixed(0)}°`;
+}
+
+// ═══════════════════════════════════════════════
+//  BOOT
+// ═══════════════════════════════════════════════
+document.getElementById('start-btn').addEventListener('click', async () => {
+  document.getElementById('splash').style.opacity = '0';
+  setTimeout(() => document.getElementById('splash').style.display = 'none', 500);
+  initThree();
+  buildList();
+  await startCamera();
+});
+
+document.getElementById('btn-scan').addEventListener('click', () => {
+  state.scanning = !state.scanning;
+  const btn = document.getElementById('btn-scan');
+  btn.classList.toggle('active', state.scanning);
+  const dot = document.getElementById('status-dot');
+  if (state.scanning) {
+    setStatus('scan', 'Scansione QR attiva…');
+  } else {
+    setStatus(state.anchor ? 'ok' : 'warn', state.anchor ? `Ancorato: ${state.anchor.id}` : 'Scansione fermata');
+  }
+});
+
+document.getElementById('btn-list').addEventListener('click', () => {
+  state.listOpen = !state.listOpen;
+  document.getElementById('el-list').classList.toggle('open', state.listOpen);
+  document.getElementById('btn-list').classList.toggle('active', state.listOpen);
+});
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+  state.pos = { x: 0, y: 1.7, z: 0 };
+  state.anchor = null;
+  state.scannedIds.clear();
+  state.scanning = false;
+  document.getElementById('btn-scan').classList.remove('active');
+  buildModel();
+  buildList();
+  setStatus('warn', 'Reset — inquadra un QR');
+});
+
+document.getElementById('btn-debug').addEventListener('click', () => {
+  state.debugMode = !state.debugMode;
+  document.getElementById('debug').classList.toggle('show', state.debugMode);
+  document.getElementById('btn-debug').classList.toggle('active', state.debugMode);
+});
+</script>
+</body>
+</html>
