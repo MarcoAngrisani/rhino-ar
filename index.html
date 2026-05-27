@@ -2416,10 +2416,24 @@ const CONFIG = Object.freeze({
   ARUCO_INTERVAL_MS:    200,   // aruco detection (slower, full-res)
 
   // Feature tracking
-  MAX_FEATURES:         80,
+  MAX_FEATURES:         84,    // 4×3 grid × 7/cell (slight headroom)
   MIN_FEATURES_TRIGGER: 30,    // re-detect if below this
   REDETECT_PERIOD:      30,    // ...or every N ticks
   FEATURE_MIN_DIST_PX:  14,    // pruning radius
+
+  // GRID-BASED FEATURE DISTRIBUTION (Step 2 — even spatial coverage)
+  GRID_COLS:            4,
+  GRID_ROWS:            3,
+  MAX_PER_CELL:         7,     // hard cap per cell
+
+  // RANSAC-light (Step 1 — outlier rejection on flow vectors)
+  RANSAC_ITERS:         16,    // hypotheses tested per frame
+  RANSAC_INLIER_PX:     2.5,   // inlier threshold (pixels in OF resolution)
+  RANSAC_MIN_VECTORS:   8,     // below this, RANSAC bypassed (accept all)
+  RANSAC_MIN_INLIERS:   6,     // below this, motion estimate suppressed
+
+  // Per-feature outlier-strike accounting
+  FEAT_MAX_STRIKES:     3,     // cull feature after N consecutive outlier frames
 
   // LK params
   LK_WIN_RADIUS:        4,
@@ -2528,8 +2542,12 @@ const STATE = {
   grayPrev:     null,   // Float32Array
 
   // Feature tracker
-  features:     [],     // {x, y, age, trail:Float32Array(TRAIL_LEN*2), trailLen}
+  features:     [],     // {x, y, age, strikes, inlier, trail:Float32Array, trailLen}
   redetectCtr:  0,
+
+  // RANSAC stats (last tick)
+  lastFlowCount:    0,
+  lastInlierCount:  0,
 
   // IMU snapshots
   prevImuQuat:  null,   // null until first IMU sample
@@ -2574,12 +2592,13 @@ let cam3      = null;
 let modelGroup = null;
 
 /* ── SCRATCH OBJECTS — pre-allocated to keep the main loop GC-FREE ─
-   Every Vector3 / Quaternion / Matrix4 needed inside the animation
-   tick is allocated ONCE here, then reused via `.copy()` / `.set()`.
-   Do not return references to these — they get overwritten every
-   call. Callers can `.copy(_S.v1)` into their own object if needed.
+   Every Vector3 / Quaternion / Matrix4 / typed-array buffer needed
+   inside the animation tick is allocated ONCE here, then reused via
+   `.copy()` / `.set()` / `.fill(0)`. Do not return references to
+   these objects — callers must `.copy()` if they need persistence.
    ───────────────────────────────────────────────────────────────── */
 const _S = {
+  // Three.js scratch
   v1: new THREE.Vector3(),
   v2: new THREE.Vector3(),
   v3: new THREE.Vector3(),
@@ -2598,14 +2617,24 @@ const _S = {
   // Alignment quaternion — device frame → camera frame (set ONCE)
   alignQuat: new THREE.Quaternion()
     .setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2),
-  // Sort scratch (avoid per-frame array allocation in median computation)
+
+  // RANSAC scratch (Step 1)
+  inlierMask:    new Uint8Array(CONFIG.MAX_FEATURES * 2),
+  tempInlierMsk: new Uint8Array(CONFIG.MAX_FEATURES * 2),
+
+  // Grid scratch (Step 2)
+  cellCount: new Uint16Array(CONFIG.GRID_COLS * CONFIG.GRID_ROWS),
+
+  // Sort scratch for MAD inside computeTranslationFromFlow
   sortDu: new Float32Array(CONFIG.MAX_FEATURES * 2),
   sortDv: new Float32Array(CONFIG.MAX_FEATURES * 2),
+
   // Posit corner scratch (4 entries, reused)
   positCorners: [
     { x: 0, y: 0 }, { x: 0, y: 0 },
     { x: 0, y: 0 }, { x: 0, y: 0 },
   ],
+
   // Output for computeTranslationFromFlow (avoid returning fresh object)
   transOut: { dx: 0, dy: 0, dz: 0, ok: false },
   // Output for rotationFlowAtPoint
@@ -2663,7 +2692,21 @@ function gradY(g, w, h, x, y) {
   return 0.5 * (sample(g, w, h, x, y + 1) - sample(g, w, h, x, y - 1));
 }
 
-/* ── Shi-Tomasi corner detector ──────────────────────────────────── */
+/* ── Grid cell index helper (Step 2) ─────────────────────────────── */
+function cellIdxOfPx(x, y) {
+  const cx = Math.min(CONFIG.GRID_COLS - 1, Math.max(0, (x * CONFIG.GRID_COLS / STATE.OF_W) | 0));
+  const cy = Math.min(CONFIG.GRID_ROWS - 1, Math.max(0, (y * CONFIG.GRID_ROWS / STATE.OF_H) | 0));
+  return cy * CONFIG.GRID_COLS + cx;
+}
+
+/* ── Shi-Tomasi corner detector — GRID-AWARE SELECTION (Step 2) ───
+   Step (a): score every candidate with the Shi-Tomasi metric
+   Step (b): sort by score descending
+   Step (c): greedy selection that simultaneously enforces:
+              • per-cell occupancy ≤ MAX_PER_CELL  (spatial distribution)
+              • min-distance to already-selected   (no clustering)
+              • global cap MAX_FEATURES
+   ───────────────────────────────────────────────────────────────── */
 function detectShiTomasi(gray, w, h) {
   const winSize  = CONFIG.ST_WIN_SIZE;
   const minScore = CONFIG.ST_MIN_SCORE;
@@ -2672,6 +2715,7 @@ function detectShiTomasi(gray, w, h) {
   const skip     = CONFIG.ST_SKIP;
   const border   = winSize + 2;
   const md2      = minDist * minDist;
+  const maxCell  = CONFIG.MAX_PER_CELL;
   const cand     = [];
 
   for (let y = border; y < h - border; y += skip) {
@@ -2694,16 +2738,25 @@ function detectShiTomasi(gray, w, h) {
   }
   cand.sort((a, b) => b.score - a.score);
 
+  // Grid-constrained NMS
   const sel = [];
+  const cellCount = _S.cellCount;
+  cellCount.fill(0);
+
   outer:
   for (let i = 0; i < cand.length; i++) {
     const c = cand[i];
+    const ci = cellIdxOfPx(c.x, c.y);
+    // Spatial-distribution constraint
+    if (cellCount[ci] >= maxCell) continue;
+    // Min-distance constraint (against already-selected)
     for (let j = 0; j < sel.length; j++) {
       const s = sel[j];
       const dx = c.x - s.x, dy = c.y - s.y;
       if (dx * dx + dy * dy < md2) continue outer;
     }
     sel.push(c);
+    cellCount[ci]++;
     if (sel.length >= maxFeats) break;
   }
   return sel;
@@ -2712,8 +2765,11 @@ function detectShiTomasi(gray, w, h) {
 /* Build feature object — pre-allocates trail buffer once per feature. */
 function makeFeature(x, y) {
   return {
-    x, y, age: 0,
-    trail: new Float32Array(CONFIG.TRAIL_LEN * 2),
+    x, y,
+    age:      0,
+    strikes:  0,
+    inlier:   1,                                       // last-frame inlier flag
+    trail:    new Float32Array(CONFIG.TRAIL_LEN * 2),
     trailLen: 0,
   };
 }
@@ -2742,8 +2798,7 @@ function trackLK(g1, g2, features, w, h, out) {
   const maxRes  = CONFIG.LK_MAX_RESIDUAL;
   out.length = 0;
 
-  // Local Float32Array workspaces (per feature). Allocated once per call,
-  // not per feature, since (2*wr+1)^2 is small (here 81 floats).
+  // Local Float32Array workspaces (per call). (2*wr+1)^2 = 81 floats.
   const winN = (2 * wr + 1) * (2 * wr + 1);
   const Ix = new Float32Array(winN);
   const Iy = new Float32Array(winN);
@@ -2802,6 +2857,108 @@ function trackLK(g1, g2, features, w, h, out) {
 }
 /* Persistent output buffer for trackLK so we don't allocate one per tick. */
 const _trackLKOut = [];
+
+/* ── RANSAC-LIGHT TRANSLATION-MODEL OUTLIER REJECTION (Step 1) ────
+   Model:    pure 2D pixel translation (du, dv)
+   Sample:   1 random flow vector → its (du, dv) is the hypothesis
+   Inlier:   ||(flow.du - du, flow.dv - dv)|| ≤ RANSAC_INLIER_PX
+   Score:    inlier count
+   Output:   writes 1 / 0 into outMask, returns inlier count.
+
+   Why 1-sample model? For pure translation, a single correct vector
+   *is* the model. With ~16 random tries the probability of picking
+   at least one true inlier as hypothesis is overwhelming up to
+   ~70 % outlier ratio — well past our worst case.
+
+   Robustness add-ons:
+     • The median flow is ALWAYS tested as an additional hypothesis
+       (deterministic fall-back when random picks are unlucky).
+     • Final refinement uses the inlier mean as the consensus model.
+   ───────────────────────────────────────────────────────────────── */
+function ransacTranslationInliers(flow, n, outMask) {
+  // Default: everything rejected
+  for (let i = 0; i < n; i++) outMask[i] = 0;
+  if (n < CONFIG.RANSAC_MIN_VECTORS) {
+    // Too few to discriminate — accept all
+    for (let i = 0; i < n; i++) outMask[i] = 1;
+    return n;
+  }
+
+  const thr2 = CONFIG.RANSAC_INLIER_PX * CONFIG.RANSAC_INLIER_PX;
+  const temp = _S.tempInlierMsk;
+  let bestCount = 0;
+  let bestDu    = 0;
+  let bestDv    = 0;
+
+  // ── Hypothesis 0: median (deterministic, always tested) ─────────
+  // O(n log n) sort once per call; acceptable for n ≤ ~84.
+  const du = _S.sortDu, dv = _S.sortDv;
+  for (let i = 0; i < n; i++) { du[i] = flow[i].du; dv[i] = flow[i].dv; }
+  const duSlice = du.subarray(0, n);
+  const dvSlice = dv.subarray(0, n);
+  duSlice.sort();
+  dvSlice.sort();
+  const medDu = duSlice[n >> 1];
+  const medDv = dvSlice[n >> 1];
+
+  {
+    let count = 0;
+    for (let i = 0; i < n; i++) {
+      const ddu = flow[i].du - medDu;
+      const ddv = flow[i].dv - medDv;
+      const inlier = (ddu * ddu + ddv * ddv) <= thr2 ? 1 : 0;
+      temp[i] = inlier;
+      count += inlier;
+    }
+    if (count > bestCount) {
+      bestCount = count; bestDu = medDu; bestDv = medDv;
+      for (let i = 0; i < n; i++) outMask[i] = temp[i];
+    }
+  }
+
+  // ── Hypotheses 1..ITERS: random samples ─────────────────────────
+  for (let iter = 0; iter < CONFIG.RANSAC_ITERS; iter++) {
+    const idx = (Math.random() * n) | 0;
+    const hu = flow[idx].du;
+    const hv = flow[idx].dv;
+    let count = 0;
+    for (let i = 0; i < n; i++) {
+      const ddu = flow[i].du - hu;
+      const ddv = flow[i].dv - hv;
+      const inlier = (ddu * ddu + ddv * ddv) <= thr2 ? 1 : 0;
+      temp[i] = inlier;
+      count += inlier;
+    }
+    if (count > bestCount) {
+      bestCount = count; bestDu = hu; bestDv = hv;
+      for (let i = 0; i < n; i++) outMask[i] = temp[i];
+      // Early-out: if we already have a strong consensus, stop
+      if (bestCount > (n * 0.8) | 0) break;
+    }
+  }
+
+  // ── Refinement: recompute inlier set against the MEAN of inliers
+  //                (one extra pass — tightens the consensus). ─────
+  if (bestCount >= CONFIG.RANSAC_MIN_INLIERS) {
+    let sumDu = 0, sumDv = 0;
+    for (let i = 0; i < n; i++) {
+      if (outMask[i]) { sumDu += flow[i].du; sumDv += flow[i].dv; }
+    }
+    const meanDu = sumDu / bestCount;
+    const meanDv = sumDv / bestCount;
+    let refinedCount = 0;
+    for (let i = 0; i < n; i++) {
+      const ddu = flow[i].du - meanDu;
+      const ddv = flow[i].dv - meanDv;
+      const inlier = (ddu * ddu + ddv * ddv) <= thr2 ? 1 : 0;
+      outMask[i] = inlier;
+      refinedCount += inlier;
+    }
+    // Use refined count only if it didn't shrink dramatically
+    if (refinedCount >= bestCount * 0.7) bestCount = refinedCount;
+  }
+  return bestCount;
+}
 
 /* ── IMU sample → camera-space quaternion (writes into out) ──────── */
 function imuToCamQuat(out) {
@@ -2926,7 +3083,7 @@ function doAnchor(markerId, pose) {
   const T = pose.bestTranslation;
   const newSceneDist = Math.sqrt(T[0] * T[0] + T[1] * T[1] + T[2] * T[2]);
 
-  // markerInCam (scratch m1) and modelInCam (scratch m2)
+  // markerInCam (scratch m1) and modelInCam (scratch m3)
   posit2three(pose, _S.m1);
   _S.m2.makeTranslation(-mk.ax, -mk.ay, -mk.az);
   _S.m3.multiplyMatrices(_S.m1, _S.m2);    // modelInCam → _S.m3
@@ -3003,6 +3160,13 @@ function updateTrackingQuality(now) {
   trust *= Math.max(0.2,  1 - sinceMarker / CONFIG.MARKER_TIMEOUT_MS);
   if (sinceFlow > CONFIG.FLOW_OK_MS)   trust *= 0.4;
   if (sinceFlow > CONFIG.FLOW_LOST_MS) trust *= 0.1;
+
+  // Penalize trust further when the inlier ratio is low (Step 1 signal)
+  if (STATE.lastFlowCount > 0) {
+    const ratio = STATE.lastInlierCount / STATE.lastFlowCount;
+    if (ratio < 0.4) trust *= 0.6;
+    else if (ratio < 0.6) trust *= 0.85;
+  }
   TRACK.trustScore = Math.max(0, Math.min(1, trust));
 
   let state;
@@ -3038,40 +3202,38 @@ function applyTrackingVisuals(state) {
 function computeTranslationFromFlow(flow, focalPx, out) {
   out.ok = false;
   const n = flow.length;
-  if (n < 8) return out;
+  if (n < CONFIG.RANSAC_MIN_INLIERS) return out;
 
-  // Use the global Float32Array sort buffer (zero new alloc)
+  // Flow vectors arriving here are RANSAC inliers already, so a simple
+  // mean is a stable consensus. MAD-light kept as defence-in-depth for
+  // the residual (post-derotation) flow, which can still have small drift.
+  let sumDu = 0, sumDv = 0;
+  for (let i = 0; i < n; i++) { sumDu += flow[i].du; sumDv += flow[i].dv; }
+  let meanDu = sumDu / n;
+  let meanDv = sumDv / n;
+
+  // Defence-in-depth MAD pass (cheap on small n)
   const du = _S.sortDu, dv = _S.sortDv;
-  if (du.length < n) { _S.sortDu = new Float32Array(n * 2); _S.sortDv = new Float32Array(n * 2); }
-  const duB = _S.sortDu, dvB = _S.sortDv;
-  for (let i = 0; i < n; i++) { duB[i] = flow[i].du; dvB[i] = flow[i].dv; }
-  // Sort just the slice we use
-  const duSlice = duB.subarray(0, n);
-  const dvSlice = dvB.subarray(0, n);
-  duSlice.sort();
-  dvSlice.sort();
-  const med_du = duSlice[n >> 1];
-  const med_dv = dvSlice[n >> 1];
-
-  // MAD — in-place computed against medians
-  for (let i = 0; i < n; i++) duSlice[i] = Math.abs(flow[i].du - med_du);
-  for (let i = 0; i < n; i++) dvSlice[i] = Math.abs(flow[i].dv - med_dv);
+  for (let i = 0; i < n; i++) { du[i] = Math.abs(flow[i].du - meanDu); dv[i] = Math.abs(flow[i].dv - meanDv); }
+  const duSlice = du.subarray(0, n);
+  const dvSlice = dv.subarray(0, n);
   duSlice.sort();
   dvSlice.sort();
   const sigU = (duSlice[n >> 1] * 1.4826) || 1;
   const sigV = (dvSlice[n >> 1] * 1.4826) || 1;
   const lu = 3 * sigU, lv = 3 * sigV;
 
-  let sumDu = 0, sumDv = 0, k = 0;
+  sumDu = 0; sumDv = 0;
+  let k = 0;
   for (let i = 0; i < n; i++) {
     const f = flow[i];
-    if (Math.abs(f.du - med_du) > lu) continue;
-    if (Math.abs(f.dv - med_dv) > lv) continue;
+    if (Math.abs(f.du - meanDu) > lu) continue;
+    if (Math.abs(f.dv - meanDv) > lv) continue;
     sumDu += f.du; sumDv += f.dv; k++;
   }
   if (k < 5) return out;
-  const meanDu = sumDu / k;
-  const meanDv = sumDv / k;
+  meanDu = sumDu / k;
+  meanDv = sumDv / k;
 
   const focalPxOf = focalPx * (STATE.OF_W / DOM.video.videoWidth);
   const Z = ANCHOR.sceneDistance;
@@ -3121,28 +3283,28 @@ function resizeOverlay() {
   overCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
-/* ── 2D overlay drawing (OF features + trail + marker outlines) ── */
+/* ── 2D overlay drawing (OF features + trail + marker outlines) ──
+   Colour coding (Step 1 visibility):
+     • strikes == 0       → solid green   (#1a9e5c)   confident inlier
+     • strikes == 1       → amber         (#e8a020)   suspect
+     • strikes >= 2       → red           (#d34a2a)   about to be culled
+   ───────────────────────────────────────────────────────────────── */
 function draw2D(markers, features, T) {
   overCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
   const ofToVid = DOM.video.videoWidth / STATE.OF_W;
 
-  // ── ODOMETRY TRAIL — re-activated (Step N+O) ─────────────────
-  // For each tracked feature, draw the polyline of its recent positions.
-  // Old positions fade; newest is brightest. This makes optical-flow
-  // odometry visually self-explanatory.
+  // ── ODOMETRY TRAIL ───────────────────────────────────────────
   if (STATE.showTrail && features) {
     overCtx.lineCap = 'round';
     overCtx.lineJoin = 'round';
+    overCtx.lineWidth = 1.4;
     for (let i = 0; i < features.length; i++) {
       const f = features[i];
       if (f.trailLen < 2) continue;
       const t = f.trail;
-      // Draw as a single path (no per-segment alpha — cheaper),
-      // then optionally overlay newest segment brighter.
       overCtx.beginPath();
-      const tx0 = t[0] * ofToVid * T.scale + T.offX;
-      const ty0 = t[1] * ofToVid * T.scale + T.offY;
-      overCtx.moveTo(tx0, ty0);
+      overCtx.moveTo(t[0] * ofToVid * T.scale + T.offX,
+                     t[1] * ofToVid * T.scale + T.offY);
       for (let p = 1; p < f.trailLen; p++) {
         const ix = p * 2;
         overCtx.lineTo(
@@ -3150,27 +3312,42 @@ function draw2D(markers, features, T) {
           t[ix + 1] * ofToVid * T.scale + T.offY,
         );
       }
-      // Final stroke segment from last-trail to current feature pos
       overCtx.lineTo(
         f.x * ofToVid * T.scale + T.offX,
         f.y * ofToVid * T.scale + T.offY,
       );
-      overCtx.strokeStyle = 'rgba(232,144,10,0.55)';
-      overCtx.lineWidth = 1.4;
+      // Inlier trails amber-bright, outliers faded
+      overCtx.strokeStyle = f.strikes === 0
+        ? 'rgba(232,144,10,0.55)'
+        : 'rgba(232,144,10,0.18)';
       overCtx.stroke();
     }
   }
 
-  // ── Current feature positions ────────────────────────────────
+  // ── Current feature positions, colour-coded by strike count ──
   if (STATE.showOF && features) {
-    overCtx.fillStyle = '#1a9e5c';
     for (let i = 0; i < features.length; i++) {
       const f = features[i];
       const sx = f.x * ofToVid * T.scale + T.offX;
       const sy = f.y * ofToVid * T.scale + T.offY;
-      overCtx.beginPath();
-      overCtx.arc(sx, sy, 3, 0, Math.PI * 2);
-      overCtx.fill();
+      if (f.strikes === 0) {
+        overCtx.fillStyle = '#1a9e5c';
+        overCtx.beginPath();
+        overCtx.arc(sx, sy, 3, 0, Math.PI * 2);
+        overCtx.fill();
+      } else if (f.strikes === 1) {
+        overCtx.fillStyle = '#e8a020';
+        overCtx.beginPath();
+        overCtx.arc(sx, sy, 3, 0, Math.PI * 2);
+        overCtx.fill();
+      } else {
+        // High-strike: red ring (open) — visually distinct from healthy
+        overCtx.strokeStyle = '#d34a2a';
+        overCtx.lineWidth = 1.5;
+        overCtx.beginPath();
+        overCtx.arc(sx, sy, 4, 0, Math.PI * 2);
+        overCtx.stroke();
+      }
     }
   }
 
@@ -3204,17 +3381,18 @@ function detectFeatures(gray) {
    MAIN ANIMATION LOOP — zero-allocation hot path
    --------------------------------------------------------------------
    All per-tick scratch lives in:
-     • _S.*           — Three.js scratch objects
+     • _S.*           — Three.js / typed-array scratch objects
      • STATE.gray*    — Float32 image buffers (allocated once)
      • _trackLKOut    — LK output array (length reset each call)
      • _flowVectors   — flow vector pool (reused via .length=0)
      • _residualFlow  — residual pool
      • _T_OUT         — transform output object
    ──────────────────────────────────────────────────────────────────── */
-const _flowVectors    = [];
-const _residualFlow   = [];
-/* lightweight ring of pre-allocated flow vector slots */
-const _flowVectorPool = [];
+const _flowVectors    = [];    // raw flow vectors after LK
+const _flowOwners     = [];    // parallel: feature corresponding to each flow vec
+const _residualFlow   = [];    // post-derotation, inlier-only
+const _flowVectorPool = [];    // pre-allocated {u,v,du,dv} slots
+
 function getFlowVecSlot(idx, pool) {
   if (idx < pool.length) return pool[idx];
   const o = { u: 0, v: 0, du: 0, dv: 0 };
@@ -3294,7 +3472,8 @@ function loop(now) {
 
   // ── Optical flow tracking ───────────────────────────────────────
   _flowVectors.length = 0;
-  let trackedFeatures = STATE.features; // default
+  _flowOwners.length  = 0;
+  let trackedFeatures = STATE.features;
   if (STATE.grayPrev && STATE.features.length > 0) {
     trackLK(STATE.grayPrev, STATE.grayCur, STATE.features,
             STATE.OF_W, STATE.OF_H, _trackLKOut);
@@ -3307,7 +3486,7 @@ function loop(now) {
       const dv  = t.y - old.y;
       // Push old position into trail BEFORE we overwrite
       pushTrail(old, old.x, old.y);
-      // Reuse feature object — mutate in place (avoid alloc)
+      // Reuse feature object — mutate in place
       old.x = t.x; old.y = t.y;
       old.age = (old.age | 0) + 1;
       next.push(old);
@@ -3317,39 +3496,102 @@ function loop(now) {
       fv.du = du;
       fv.dv = dv;
       _flowVectors.push(fv);
+      _flowOwners.push(old);
     }
     trackedFeatures = next;
+  }
+
+  /* ── STEP 1 — RANSAC outlier rejection on raw flow vectors ─────
+     Hypothesis: pure 2D pixel translation (du, dv).
+     Outcome:    inlierMask[i] = 1 if flow[i] consistent with the
+                 dominant motion, 0 otherwise.
+     Side effect: features whose flow is an outlier get a "strike";
+                 features with too many consecutive strikes are culled.
+                 Inlier features have their strike count decremented.
+     ───────────────────────────────────────────────────────────── */
+  const nFlow = _flowVectors.length;
+  const inMask = _S.inlierMask;
+  let inlierCount = 0;
+  if (nFlow > 0) {
+    if (inMask.length < nFlow) {
+      _S.inlierMask    = new Uint8Array(nFlow * 2);
+      _S.tempInlierMsk = new Uint8Array(nFlow * 2);
+    }
+    inlierCount = ransacTranslationInliers(_flowVectors, nFlow, _S.inlierMask);
+  }
+  STATE.lastFlowCount   = nFlow;
+  STATE.lastInlierCount = inlierCount;
+
+  // Apply strike accounting + cull, rebuild kept-features and residual pool
+  _residualFlow.length = 0;
+  if (nFlow > 0) {
+    const kept = [];
+    const mask = _S.inlierMask;
+    for (let i = 0; i < nFlow; i++) {
+      const feat = _flowOwners[i];
+      const isInlier = mask[i] === 1;
+      if (isInlier) {
+        if (feat.strikes > 0) feat.strikes--;
+        feat.inlier = 1;
+      } else {
+        feat.strikes++;
+        feat.inlier = 0;
+      }
+      if (feat.strikes < CONFIG.FEAT_MAX_STRIKES) {
+        kept.push(feat);
+      } else {
+        // Culled — clear its trail so it doesn't haunt the visualization
+        feat.trailLen = 0;
+      }
+    }
+    trackedFeatures = kept;
   }
   STATE.features = trackedFeatures;
 
   // ── Re-detect features periodically or when too few ─────────────
+  // (Now grid-aware: respects MAX_PER_CELL when adding to existing set.)
   STATE.redetectCtr++;
   if (STATE.features.length < CONFIG.MIN_FEATURES_TRIGGER ||
       STATE.redetectCtr >= CONFIG.REDETECT_PERIOD) {
     STATE.redetectCtr = 0;
     const newSet = detectFeatures(STATE.grayCur);
     const md2 = CONFIG.FEATURE_MIN_DIST_PX * CONFIG.FEATURE_MIN_DIST_PX;
+
+    // Count current per-cell occupancy of STATE.features
+    const cellCount = _S.cellCount;
+    cellCount.fill(0);
+    for (let i = 0; i < STATE.features.length; i++) {
+      cellCount[cellIdxOfPx(STATE.features[i].x, STATE.features[i].y)]++;
+    }
+
     for (let i = 0; i < newSet.length; i++) {
       if (STATE.features.length >= CONFIG.MAX_FEATURES) break;
       const nf = newSet[i];
+      const ci = cellIdxOfPx(nf.x, nf.y);
+      if (cellCount[ci] >= CONFIG.MAX_PER_CELL) continue;
       let tooClose = false;
       for (let j = 0; j < STATE.features.length; j++) {
         const ef = STATE.features[j];
         const dx = nf.x - ef.x, dy = nf.y - ef.y;
         if (dx * dx + dy * dy < md2) { tooClose = true; break; }
       }
-      if (!tooClose) STATE.features.push(nf);
+      if (!tooClose) {
+        STATE.features.push(nf);
+        cellCount[ci]++;
+      }
     }
   }
 
   // ── Estimate camera translation (IMU-derotated optical flow) ────
-  if (ANCHOR.set && _flowVectors.length > 8 && STATE.prevImuQuat && IMU.ready) {
+  if (ANCHOR.set && inlierCount >= CONFIG.RANSAC_MIN_INLIERS &&
+      STATE.prevImuQuat && IMU.ready) {
     const focalPx = video.videoWidth * CONFIG.FOCAL_FACTOR;
     imuToCamQuat(_S.qCam);
     _S.qDelta.copy(_S.qCam).multiply(_S.q2.copy(STATE.prevImuQuat).invert());
 
-    _residualFlow.length = 0;
-    for (let i = 0; i < _flowVectors.length; i++) {
+    const mask = _S.inlierMask;
+    for (let i = 0; i < nFlow; i++) {
+      if (mask[i] !== 1) continue; // <-- USE ONLY RANSAC INLIERS
       const fv = _flowVectors[i];
       const r = rotationFlowAtPoint(fv.u, fv.v, focalPx, _S.qDelta, _S.rotOut);
       if (!r.ok) continue;
@@ -3397,7 +3639,9 @@ function loop(now) {
   STATE.grayCur  = tmp || new Float32Array(STATE.OF_W * STATE.OF_H);
 
   // ── Status / UI ─────────────────────────────────────────────────
-  DOM.iOf.textContent    = STATE.features.length;
+  // Feature counter shows "inliers / total" so the operator sees
+  // RANSAC working at a glance.
+  DOM.iOf.textContent    = `${STATE.lastInlierCount}/${STATE.features.length}`;
   DOM.iPos.textContent   = `${ANCHOR.camPos.x.toFixed(2)} ${ANCHOR.camPos.y.toFixed(2)} ${ANCHOR.camPos.z.toFixed(2)}`;
   DOM.iState.textContent = TRACK.state.toUpperCase();
   DOM.iTrust.textContent = `${(TRACK.trustScore * 100).toFixed(0)}%`;
@@ -3538,7 +3782,6 @@ window.addEventListener('orientationchange', () => setTimeout(onResize, 200));
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     if (DOM.video && DOM.video.srcObject) {
-      // Don't stop — just note. Browser may already throttle rAF.
       console.info('[VIO] visibility hidden — rAF will throttle');
     }
   }
@@ -3563,8 +3806,13 @@ DOM.tbReanchor.addEventListener('click', () => {
   TRACK.trustScore  = 1.0;
   TRACK.state = 'init';
   TRACK.lastFlowOkT = 0;
-  // Reset all feature trails so the visualization doesn't drift across re-anchors
-  for (let i = 0; i < STATE.features.length; i++) STATE.features[i].trailLen = 0;
+  // Reset all feature trails AND strikes so the visualization starts clean
+  for (let i = 0; i < STATE.features.length; i++) {
+    STATE.features[i].trailLen = 0;
+    STATE.features[i].strikes  = 0;
+  }
+  STATE.lastFlowCount   = 0;
+  STATE.lastInlierCount = 0;
   if (modelGroup) modelGroup.visible = false;
   setStatus('Re-anchor: inquadra di nuovo un marker', 'searching');
 });
