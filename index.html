@@ -2,50 +2,139 @@
 <html lang="it">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Step L2 — VIO</title>
 <style>
-* { margin:0; padding:0; box-sizing:border-box; }
-body { font-family: Arial, sans-serif; background:#000; color:#fff; overflow:hidden; height:100dvh; width:100vw; }
+/* ============================================================
+   BASE RESET + LAYOUT
+   ============================================================ */
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 
-#splash {
-  position:fixed; inset:0; z-index:100; background:#0a0a0f;
-  display:flex; flex-direction:column; align-items:center; justify-content:center;
-  gap:1.4rem; padding:2rem; text-align:center;
+html, body {
+  height: 100dvh;
+  width: 100vw;
+  overflow: hidden;
+  background: #000;
+  color: #fff;
+  font-family: 'Courier New', ui-monospace, monospace;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
 }
-.version { font-size:.65rem; letter-spacing:.12em; opacity:.4; text-transform:uppercase; }
-h1 { font-size:2.4rem; letter-spacing:-.02em; text-transform:uppercase; }
-h1 span { color:#e8410a; }
-#splash p { font-size:.82rem; opacity:.6; max-width:340px; line-height:1.5; }
-#splash label { font-size:.7rem; opacity:.7; display:flex; align-items:center; gap:.5rem; }
-#splash input { width:60px; padding:.3rem; background:#1a1a22; color:#fff; border:1px solid #333; font-family:Arial; font-size:.85rem; text-align:center; }
-button {
-  background:#e8410a; color:#fff; border:none;
-  padding:.9rem 2.4rem; font-family:Arial,sans-serif; font-size:1rem;
-  letter-spacing:.08em; text-transform:uppercase; cursor:pointer;
-  -webkit-tap-highlight-color:transparent;
-}
-button:active { opacity:.8; }
 
-#perm-modal {
-  position:fixed; inset:0; z-index:150; background:rgba(10,10,15,.95);
-  display:none; flex-direction:column; align-items:center; justify-content:center;
-  gap:1.2rem; padding:2rem; text-align:center;
-}
-#perm-modal.show { display:flex; }
-.ico { font-size:2.5rem; }
-
-#cam { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; }
-#c3d { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:2; }
+/* Full-viewport layered surfaces (camera → 3D → 2D overlay) */
+#cam     { position:fixed; inset:0; width:100%; height:100%; object-fit:cover; z-index:1; background:#000; }
+#c3d     { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:2; }
 #overlay { position:fixed; inset:0; width:100%; height:100%; pointer-events:none; z-index:3; }
 
+/* ============================================================
+   SPLASH / PERMISSION MODALS
+   ============================================================ */
+.modal {
+  position:fixed; inset:0; z-index:100;
+  background:#0a0a0f;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:1.4rem;
+  padding:2rem max(2rem, env(safe-area-inset-left, 2rem));
+  text-align:center;
+}
+.modal.hidden { display:none; }
+
+#splash .version {
+  font-size:.65rem; letter-spacing:.18em; opacity:.4;
+  text-transform:uppercase;
+}
+#splash h1 {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: clamp(2rem, 8vw, 2.6rem);
+  letter-spacing:-.02em;
+  text-transform:uppercase;
+  font-weight:900;
+}
+#splash h1 span { color:#e8410a; }
+#splash p {
+  font-size:.82rem; opacity:.65; max-width:340px;
+  line-height:1.55;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+#splash label {
+  font-size:.7rem; opacity:.75;
+  display:flex; align-items:center; gap:.6rem;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+#splash input {
+  width:70px; padding:.35rem;
+  background:#1a1a22; color:#fff;
+  border:1px solid #333;
+  font-family: ui-monospace, monospace;
+  font-size:.85rem; text-align:center;
+}
+
+button.primary {
+  background:#e8410a; color:#fff; border:none;
+  padding:.9rem 2.6rem;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size:1rem; font-weight:600;
+  letter-spacing:.1em; text-transform:uppercase;
+  cursor:pointer;
+}
+button.primary:active { opacity:.78; transform:scale(.98); }
+
+#perm-modal .ico { font-size:2.6rem; }
+#perm-modal p {
+  font-size:.95rem;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+/* ============================================================
+   FATAL ERROR BANNER (camera/webgl unrecoverable)
+   ============================================================ */
+#fatal {
+  position:fixed; inset:0; z-index:200;
+  background: rgba(20, 8, 8, 0.96);
+  display:none; flex-direction:column;
+  align-items:center; justify-content:center;
+  padding:2rem;
+  text-align:center;
+}
+#fatal.show { display:flex; }
+#fatal h2 {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size:1.4rem; letter-spacing:.08em; text-transform:uppercase;
+  color:#ff5b3a; margin-bottom:1rem;
+}
+#fatal p {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size:.9rem; opacity:.8; max-width:380px; line-height:1.5;
+}
+#fatal small {
+  display:block; margin-top:1rem; font-size:.65rem; opacity:.5;
+  font-family: ui-monospace, monospace;
+}
+
+/* ============================================================
+   STATUS BAR (top)
+   ============================================================ */
 #status {
-  position:fixed; top:1rem; left:1rem; right:1rem;
-  background:rgba(10,10,15,.78); backdrop-filter:blur(10px);
-  padding:.55rem .85rem; border-left:3px solid #f0a500;
-  font-size:.7rem; letter-spacing:.06em; text-transform:uppercase;
-  pointer-events:none; z-index:10;
-  transition: border-left-color .3s;
+  position:fixed;
+  top: calc(.75rem + env(safe-area-inset-top, 0px));
+  left:.75rem; right:.75rem;
+  background:rgba(10,10,15,.78);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding:.6rem .9rem;
+  border-left:3px solid #f0a500;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size:.7rem; letter-spacing:.08em;
+  text-transform:uppercase;
+  pointer-events:none;
+  z-index:10;
+  transition: border-left-color .25s ease, background-color .25s ease;
 }
 #status.anchored  { border-left-color:#1a9e5c; }
 #status.searching { border-left-color:#e8410a; }
@@ -53,80 +142,225 @@ button:active { opacity:.8; }
 #status.lost      { border-left-color:#d32f2f; animation: pulse-lost 1.2s infinite; }
 @keyframes pulse-lost {
   0%, 100% { background:rgba(10,10,15,.78); }
-  50%      { background:rgba(211,47,47,.4); }
+  50%      { background:rgba(211,47,47,.42); }
 }
 
-#info {
-  position:fixed; bottom:1rem; left:1rem; right:1rem;
-  background:rgba(10,10,15,.78); backdrop-filter:blur(10px);
-  padding:.6rem .85rem; font-size:.62rem; line-height:1.65;
-  pointer-events:none; z-index:10; font-family: 'Courier New', monospace;
+/* ============================================================
+   CONTROL PANEL (right side) — display toggles + actions
+   ============================================================ */
+#controls {
+  position:fixed;
+  top: calc(3.4rem + env(safe-area-inset-top, 0px));
+  right:.75rem;
+  z-index:11;
+  display:flex; flex-direction:column;
+  gap:.55rem;
+  pointer-events:none;
 }
-.kv { display:flex; justify-content:space-between; gap:1rem; }
-.kv span:first-child { opacity:.5; }
-
+.ctrl-group {
+  display:flex; flex-direction:column;
+  gap:1px;
+  background: rgba(10,10,15,.65);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border:1px solid rgba(255,255,255,.08);
+  padding:0;
+  pointer-events:auto;
+  overflow:hidden;
+}
+.ctrl-group .label {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size:.52rem;
+  letter-spacing:.16em;
+  opacity:.4;
+  text-transform:uppercase;
+  padding:.3rem .6rem .15rem;
+  text-align:left;
+}
 .tb {
-  position:fixed; right:1rem;
-  background:rgba(10,10,15,.78); backdrop-filter:blur(10px);
-  border:1px solid rgba(255,255,255,.15); color:#fff;
-  font-family:Arial; font-size:.6rem; letter-spacing:.06em; text-transform:uppercase;
-  padding:.4rem .65rem; cursor:pointer; z-index:11;
+  background:transparent;
+  color:#fff;
+  border:none;
+  border-top:1px solid rgba(255,255,255,.06);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size:.62rem;
+  letter-spacing:.1em;
+  text-transform:uppercase;
+  padding:.55rem .85rem;
+  cursor:pointer;
+  text-align:left;
+  display:flex; align-items:center; gap:.55rem;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color .15s, color .15s;
+  min-width:120px;
 }
-.tb.on { border-color:#e8410a; color:#e8410a; }
-#tb-of      { bottom:9.5rem; }
-#tb-markers { bottom:8.1rem; }
-#tb-reanchor{ bottom:6.7rem; }
+.tb:first-of-type { border-top:none; }
+.tb:active { background:rgba(232,65,10,.18); }
+.tb .dot {
+  width:7px; height:7px; border-radius:50%;
+  background:#444;
+  flex-shrink:0;
+  transition: background-color .15s, box-shadow .15s;
+}
+.tb.on .dot {
+  background:#1a9e5c;
+  box-shadow: 0 0 6px rgba(26,158,92,.7);
+}
+.tb.on { color:#fff; }
+.tb.action {
+  color:#e8410a;
+}
+.tb.action .dot {
+  background:#e8410a;
+  box-shadow: 0 0 6px rgba(232,65,10,.6);
+}
+.tb.action:active { background:rgba(232,65,10,.28); }
 
-#center-arrow {
-  position:fixed; top:50%; left:50%;
-  transform: translate(-50%, -50%);
-  width:80px; height:80px;
-  pointer-events:none; z-index:8;
-  display:none;
+/* ============================================================
+   INFO PANEL (bottom)
+   ============================================================ */
+#info {
+  position:fixed;
+  bottom: calc(.75rem + env(safe-area-inset-bottom, 0px));
+  left:.75rem; right:.75rem;
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:.5rem;
+  pointer-events:none;
+  z-index:10;
+}
+.info-block {
+  background: rgba(10,10,15,.7);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-left:2px solid rgba(232,65,10,.55);
+  padding:.5rem .7rem;
+  font-family: ui-monospace, 'Courier New', monospace;
+  font-size:.62rem;
+  line-height:1.7;
+}
+.info-block.tracking {
+  border-left-color: rgba(26,158,92,.55);
+}
+.kv {
+  display:flex;
+  justify-content:space-between;
+  gap:.5rem;
+}
+.kv > span:first-child {
+  opacity:.45;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.kv > span:last-child {
+  color:#e8410a;
+  font-weight:600;
+  text-align:right;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.info-block.tracking .kv > span:last-child { color:#1a9e5c; }
+
+/* ============================================================
+   SMALL SCREENS — denser layout
+   ============================================================ */
+@media (max-height: 640px) {
+  #info { font-size:.58rem; }
+  .info-block { padding:.4rem .6rem; }
+  .tb { padding:.45rem .7rem; font-size:.58rem; min-width:108px; }
+}
+@media (max-width: 360px) {
+  .tb { min-width:96px; padding:.45rem .6rem; font-size:.56rem; }
 }
 </style>
 </head>
 <body>
 
-<div id="splash">
-  <div class="version">v1.5 — Step N+O: soft anchor + tracking quality</div>
-  <h1>STEP <span>N+O</span></h1>
-  <p>Soft re-anchor + tracking quality detection. Il modello si adatta morbido al marker e mostra lo stato del tracking in tempo reale.</p>
-  <label>Dim. marker (mm)
-    <input type="number" id="marker-size" value="50" min="10" max="500">
-  </label>
-  <button id="btn-start">AVVIA</button>
-</div>
-
-<div id="perm-modal">
-  <div class="ico">📡</div>
-  <p>Autorizza il giroscopio.</p>
-  <button id="btn-gyro">AUTORIZZA</button>
-</div>
-
+<!-- ============================================================
+     CAMERA + RENDERING SURFACES
+     ============================================================ -->
 <video id="cam" autoplay playsinline muted></video>
 <canvas id="c3d"></canvas>
 <canvas id="overlay"></canvas>
 <canvas id="work" style="display:none"></canvas>
-<canvas id="center-arrow"></canvas>
 
-<button class="tb on" id="tb-of">OPTICAL FLOW</button>
-<button class="tb on" id="tb-markers">MARKERS</button>
-<button class="tb" id="tb-reanchor">RE-ANCHOR</button>
-
+<!-- ============================================================
+     STATUS BAR
+     ============================================================ -->
 <div id="status">In attesa…</div>
 
-<div id="info">
-  <div class="kv"><span>Stato</span><span id="i-state">init</span></div>
-  <div class="kv"><span>Trust</span><span id="i-trust">—</span></div>
-  <div class="kv"><span>Drift OF</span><span id="i-drift">—</span></div>
-  <div class="kv"><span>Feature OF</span><span id="i-of">0</span></div>
-  <div class="kv"><span>Pos camera</span><span id="i-pos">—</span></div>
-  <div class="kv"><span>Trasl.frame</span><span id="i-trans">—</span></div>
-  <div class="kv"><span>Marker</span><span id="i-id">—</span></div>
-  <div class="kv"><span>FPS</span><span id="i-fps">0</span></div>
+<!-- ============================================================
+     CONTROL PANEL (right column — DISPLAY toggles + ACTION)
+     ============================================================ -->
+<div id="controls">
+  <div class="ctrl-group">
+    <div class="label">Display</div>
+    <button class="tb on" id="tb-of"><span class="dot"></span>Flow</button>
+    <button class="tb on" id="tb-trail"><span class="dot"></span>Trail</button>
+    <button class="tb on" id="tb-markers"><span class="dot"></span>Marker</button>
+  </div>
+  <div class="ctrl-group">
+    <div class="label">Action</div>
+    <button class="tb action" id="tb-reanchor"><span class="dot"></span>Re-anchor</button>
+  </div>
 </div>
 
+<!-- ============================================================
+     INFO PANEL (bottom — split in 2 logical blocks)
+     ============================================================ -->
+<div id="info">
+  <div class="info-block tracking">
+    <div class="kv"><span>State</span><span id="i-state">init</span></div>
+    <div class="kv"><span>Trust</span><span id="i-trust">—</span></div>
+    <div class="kv"><span>Drift</span><span id="i-drift">—</span></div>
+    <div class="kv"><span>FPS</span><span id="i-fps">0</span></div>
+  </div>
+  <div class="info-block">
+    <div class="kv"><span>Feat</span><span id="i-of">0</span></div>
+    <div class="kv"><span>Pos</span><span id="i-pos">—</span></div>
+    <div class="kv"><span>ΔT</span><span id="i-trans">—</span></div>
+    <div class="kv"><span>Mark</span><span id="i-id">—</span></div>
+  </div>
+</div>
+
+<!-- ============================================================
+     SPLASH (start screen)
+     ============================================================ -->
+<div id="splash" class="modal">
+  <div class="version">v1.6 — Step N+O: soft anchor + tracking quality + trail</div>
+  <h1>STEP <span>N+O</span></h1>
+  <p>Soft re-anchor + tracking quality detection con trail di odometria. Il modello si adatta morbido al marker e mostra lo stato del tracking in tempo reale.</p>
+  <label>Dim. marker (mm)
+    <input type="number" id="marker-size" value="50" min="10" max="500" inputmode="numeric">
+  </label>
+  <button class="primary" id="btn-start">Avvia</button>
+</div>
+
+<!-- ============================================================
+     PERMISSION MODAL (iOS gyro)
+     ============================================================ -->
+<div id="perm-modal" class="modal hidden">
+  <div class="ico">📡</div>
+  <p>Autorizza il giroscopio per il tracking del movimento.</p>
+  <button class="primary" id="btn-gyro">Autorizza</button>
+</div>
+
+<!-- ============================================================
+     FATAL ERROR OVERLAY
+     ============================================================ -->
+<div id="fatal">
+  <h2 id="fatal-title">Errore</h2>
+  <p id="fatal-msg">—</p>
+  <small id="fatal-hint"></small>
+</div>
+
+
+<!-- ============================================================
+     PHASE 1 — MATH ENGINES & CORE UTILITY ALGORITHMS
+     SVD · CV · ArUco · POSIT (Juan Mellado, MIT; coplanar PnP).
+     Preserved verbatim — third-party operational math.
+     ============================================================ -->
 <script>
 // ═══════════════════════════════════════════════
 // ARUCO + POSIT (inline)
@@ -2153,15 +2387,73 @@ POS.Pose = function(error1, rotation1, translation1, error2, rotation2, translat
 
 </script>
 
+<!-- ============================================================
+     three.js r128 (CDN). Loaded between Phase 1 and Phase 2 so
+     that the app script has both AR/POS/CV/SVD and THREE in scope.
+     ============================================================ -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
+<!-- ============================================================
+     PHASES 2 · 3 · 4 — APP STATE, RENDERING ENGINE, LIFECYCLE
+     ============================================================ -->
 <script>
 'use strict';
 
-// ═══════════════════════════════════════════════
-// MODEL
-// ═══════════════════════════════════════════════
-const MODEL = {
+/* ════════════════════════════════════════════════════════════════════
+   PHASE 2 — APP STATE & GLOBAL CONFIGURATION
+   --------------------------------------------------------------------
+   Everything mutable / configurable lives in clearly-scoped objects
+   to make the data flow visible and prevent leaky globals.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── Tunable constants (read-only) ───────────────────────────────── */
+const CONFIG = Object.freeze({
+  // Image / OF working resolution (width fixed; height set after camera up)
+  OF_W:                 320,
+
+  // Loop cadence (ms)
+  OF_INTERVAL_MS:       80,    // optical flow tick
+  ARUCO_INTERVAL_MS:    200,   // aruco detection (slower, full-res)
+
+  // Feature tracking
+  MAX_FEATURES:         80,
+  MIN_FEATURES_TRIGGER: 30,    // re-detect if below this
+  REDETECT_PERIOD:      30,    // ...or every N ticks
+  FEATURE_MIN_DIST_PX:  14,    // pruning radius
+
+  // LK params
+  LK_WIN_RADIUS:        4,
+  LK_MAX_ITER:          8,
+  LK_MAX_RESIDUAL:      40,
+
+  // Shi-Tomasi
+  ST_WIN_SIZE:          4,
+  ST_MIN_SCORE:         5,
+  ST_SKIP:              4,
+
+  // Anchor smoothing
+  ANCHOR_BLEND_ALPHA:   0.12,  // higher = snappier re-anchor
+  ANCHOR_TELEPORT_M:    2.0,   // gap above which we skip blending
+  TRANS_CLAMP_M:        0.20,  // max plausible translation per frame
+
+  // Trail (odometry visualization)
+  TRAIL_LEN:            8,     // positions per feature
+
+  // Camera intrinsics estimation
+  FOCAL_FACTOR:         0.85,  // focal_px ≈ image_width * factor
+
+  // Tracking quality
+  DRIFT_HALF_M:         1.5,
+  MARKER_TIMEOUT_MS:    60000,
+  FLOW_OK_MS:           500,
+  FLOW_LOST_MS:         1500,
+  N_FEAT_DEGRADED:      20,
+  N_FEAT_LOST:          5,
+  TRUST_DEGRADED:       0.5,
+});
+
+/* ── Scene model (markers + structural elements) ─────────────────── */
+const MODEL = Object.freeze({
   markers: [
     { id: 0, name: 'PIL-A1', ax: 0, ay: 0, az: 0 },
     { id: 1, name: 'PIL-A2', ax: 5, ay: 0, az: 0 },
@@ -2169,67 +2461,247 @@ const MODEL = {
     { id: 3, name: 'PIL-B2', ax: 5, ay: 4, az: 0 },
   ],
   elements: [
-    { id:'PIL-A1', type:'column', x:0, y:0, z:0, h:3.2, r:0.15 },
-    { id:'PIL-A2', type:'column', x:5, y:0, z:0, h:3.2, r:0.15 },
-    { id:'PIL-B1', type:'column', x:0, y:4, z:0, h:3.2, r:0.15 },
-    { id:'PIL-B2', type:'column', x:5, y:4, z:0, h:3.2, r:0.15 },
-    { id:'TRV-1', type:'beam', x1:0, y1:0, x2:5, y2:0, z:3.2, w:0.25, h:0.45 },
-    { id:'TRV-2', type:'beam', x1:0, y1:4, x2:5, y2:4, z:3.2, w:0.25, h:0.45 },
-    { id:'TRV-3', type:'beam', x1:0, y1:0, x2:0, y2:4, z:3.2, w:0.25, h:0.45 },
-    { id:'TRV-4', type:'beam', x1:5, y1:0, x2:5, y2:4, z:3.2, w:0.25, h:0.45 },
-    { id:'PAR-1', type:'wall', x1:5, y1:0, x2:5, y2:4, z:0, h:3.2, t:0.2 },
-  ]
-};
-const MARKER_MAP = {};
+    { id: 'PIL-A1', type: 'column', x: 0, y: 0, z: 0, h: 3.2, r: 0.15 },
+    { id: 'PIL-A2', type: 'column', x: 5, y: 0, z: 0, h: 3.2, r: 0.15 },
+    { id: 'PIL-B1', type: 'column', x: 0, y: 4, z: 0, h: 3.2, r: 0.15 },
+    { id: 'PIL-B2', type: 'column', x: 5, y: 4, z: 0, h: 3.2, r: 0.15 },
+    { id: 'TRV-1', type: 'beam', x1: 0, y1: 0, x2: 5, y2: 0, z: 3.2, w: 0.25, h: 0.45 },
+    { id: 'TRV-2', type: 'beam', x1: 0, y1: 4, x2: 5, y2: 4, z: 3.2, w: 0.25, h: 0.45 },
+    { id: 'TRV-3', type: 'beam', x1: 0, y1: 0, x2: 0, y2: 4, z: 3.2, w: 0.25, h: 0.45 },
+    { id: 'TRV-4', type: 'beam', x1: 5, y1: 0, x2: 5, y2: 4, z: 3.2, w: 0.25, h: 0.45 },
+    { id: 'PAR-1', type: 'wall', x1: 5, y1: 0, x2: 5, y2: 4, z: 0, h: 3.2, t: 0.2 },
+  ],
+});
+const MARKER_MAP = Object.create(null);
 MODEL.markers.forEach(m => { MARKER_MAP[m.id] = m; });
 
-// ═══════════════════════════════════════════════
-// OPTICAL FLOW — same library as L1
-// ═══════════════════════════════════════════════
-function rgbaToGray(rgba, w, h) {
-  const gray = new Float32Array(w * h);
-  for (let i = 0, p = 0; p < gray.length; p++, i += 4) {
-    gray[p] = 0.299 * rgba[i] + 0.587 * rgba[i+1] + 0.114 * rgba[i+2];
-  }
-  return gray;
-}
-function sample(gray, w, h, x, y) {
-  if (x < 0 || x >= w-1 || y < 0 || y >= h-1) return 0;
-  const x0 = Math.floor(x), y0 = Math.floor(y);
-  const fx = x - x0, fy = y - y0;
-  const i = y0 * w + x0;
-  return (1-fx)*(1-fy)*gray[i] + fx*(1-fy)*gray[i+1] + (1-fx)*fy*gray[i+w] + fx*fy*gray[i+w+1];
-}
-function gradX(g,w,h,x,y){return 0.5*(sample(g,w,h,x+1,y)-sample(g,w,h,x-1,y));}
-function gradY(g,w,h,x,y){return 0.5*(sample(g,w,h,x,y+1)-sample(g,w,h,x,y-1));}
+/* ── DOM handle cache (one lookup, used everywhere) ──────────────── */
+const DOM = {
+  splash:      document.getElementById('splash'),
+  permModal:   document.getElementById('perm-modal'),
+  fatal:       document.getElementById('fatal'),
+  fatalTitle:  document.getElementById('fatal-title'),
+  fatalMsg:    document.getElementById('fatal-msg'),
+  fatalHint:   document.getElementById('fatal-hint'),
+  status:      document.getElementById('status'),
 
-function detectShiTomasi(gray, w, h, opts) {
-  opts = opts || {};
-  const winSize = opts.winSize || 4;
-  const minScore = opts.minScore || 5;
-  const minDist = opts.minDist || 14;
-  const maxFeats = opts.maxFeats || 80;
-  const skip = opts.skip || 4;
-  const border = winSize + 2;
-  const cand = [];
-  for (let y=border; y<h-border; y+=skip) for (let x=border; x<w-border; x+=skip) {
-    let Sxx=0, Syy=0, Sxy=0;
-    for (let dy=-winSize; dy<=winSize; dy++) for (let dx=-winSize; dx<=winSize; dx++) {
-      const gx = gradX(gray,w,h,x+dx,y+dy), gy = gradY(gray,w,h,x+dx,y+dy);
-      Sxx+=gx*gx; Syy+=gy*gy; Sxy+=gx*gy;
-    }
-    const tr = Sxx+Syy, det = Sxx*Syy-Sxy*Sxy;
-    const disc = Math.sqrt(Math.max(0, tr*tr/4-det));
-    const lambdaMin = tr/2 - disc;
-    const score = lambdaMin / (winSize*winSize*4);
-    if (score > minScore) cand.push({x,y,score});
+  video:       document.getElementById('cam'),
+  overlay:     document.getElementById('overlay'),
+  work:        document.getElementById('work'),
+  c3d:         document.getElementById('c3d'),
+
+  markerSize:  document.getElementById('marker-size'),
+  btnStart:    document.getElementById('btn-start'),
+  btnGyro:     document.getElementById('btn-gyro'),
+
+  tbOf:        document.getElementById('tb-of'),
+  tbTrail:     document.getElementById('tb-trail'),
+  tbMarkers:   document.getElementById('tb-markers'),
+  tbReanchor:  document.getElementById('tb-reanchor'),
+
+  iState:      document.getElementById('i-state'),
+  iTrust:      document.getElementById('i-trust'),
+  iDrift:      document.getElementById('i-drift'),
+  iFps:        document.getElementById('i-fps'),
+  iOf:         document.getElementById('i-of'),
+  iPos:        document.getElementById('i-pos'),
+  iTrans:      document.getElementById('i-trans'),
+  iId:         document.getElementById('i-id'),
+};
+
+const overCtx = DOM.overlay.getContext('2d');
+const workCtx = DOM.work.getContext('2d', { willReadFrequently: true });
+
+/* ── Mutable runtime state (single object — easy to inspect) ─────── */
+const STATE = {
+  // Boot flags
+  camOk:        false,
+  threeOk:      false,
+
+  // Image runtime resolution
+  OF_W:         CONFIG.OF_W,
+  OF_H:         0,
+  markerSizeM:  0.05,
+
+  // Buffers (pre-allocated when video size known — see startCamera)
+  grayCur:      null,   // Float32Array
+  grayPrev:     null,   // Float32Array
+
+  // Feature tracker
+  features:     [],     // {x, y, age, trail:Float32Array(TRAIL_LEN*2), trailLen}
+  redetectCtr:  0,
+
+  // IMU snapshots
+  prevImuQuat:  null,   // null until first IMU sample
+
+  // Timing
+  lastTickT:    0,
+  lastDetectT:  0,
+  fpsAccumT:    0,
+  fpsFrames:    0,
+  fps:          0,
+
+  // Toggleable display
+  showOF:       true,
+  showTrail:    true,
+  showMarkers:  true,
+};
+
+const ANCHOR = {
+  set:           false,
+  modelMatrix:   new THREE.Matrix4(),
+  camPos:        new THREE.Vector3(),
+  targetCamPos:  new THREE.Vector3(),
+  sceneDistance: 1.5,
+  lastMarkerT:   0,
+};
+
+const TRACK = {
+  state:        'init',  // init | ok | degraded | lost
+  lastFlowOkT:  0,
+  driftMeters:  0,
+  trustScore:   1.0,
+};
+
+const IMU = { a: 0, b: 0, g: 0, ready: false };
+
+/* ── Three.js handles ────────────────────────────────────────────── */
+let detector  = null;
+let posit     = null;
+let renderer  = null;
+let scene     = null;
+let cam3      = null;
+let modelGroup = null;
+
+/* ── SCRATCH OBJECTS — pre-allocated to keep the main loop GC-FREE ─
+   Every Vector3 / Quaternion / Matrix4 needed inside the animation
+   tick is allocated ONCE here, then reused via `.copy()` / `.set()`.
+   Do not return references to these — they get overwritten every
+   call. Callers can `.copy(_S.v1)` into their own object if needed.
+   ───────────────────────────────────────────────────────────────── */
+const _S = {
+  v1: new THREE.Vector3(),
+  v2: new THREE.Vector3(),
+  v3: new THREE.Vector3(),
+  v4: new THREE.Vector3(),
+  q1: new THREE.Quaternion(),
+  q2: new THREE.Quaternion(),
+  qDelta: new THREE.Quaternion(),
+  qInv: new THREE.Quaternion(),
+  qDev: new THREE.Quaternion(),
+  qCam: new THREE.Quaternion(),
+  euler: new THREE.Euler(),
+  m1: new THREE.Matrix4(),
+  m2: new THREE.Matrix4(),
+  m3: new THREE.Matrix4(),
+  m4: new THREE.Matrix4(),
+  // Alignment quaternion — device frame → camera frame (set ONCE)
+  alignQuat: new THREE.Quaternion()
+    .setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2),
+  // Sort scratch (avoid per-frame array allocation in median computation)
+  sortDu: new Float32Array(CONFIG.MAX_FEATURES * 2),
+  sortDv: new Float32Array(CONFIG.MAX_FEATURES * 2),
+  // Posit corner scratch (4 entries, reused)
+  positCorners: [
+    { x: 0, y: 0 }, { x: 0, y: 0 },
+    { x: 0, y: 0 }, { x: 0, y: 0 },
+  ],
+  // Output for computeTranslationFromFlow (avoid returning fresh object)
+  transOut: { dx: 0, dy: 0, dz: 0, ok: false },
+  // Output for rotationFlowAtPoint
+  rotOut:   { u: 0, v: 0, ok: false },
+};
+
+/* ════════════════════════════════════════════════════════════════════
+   PHASE 3 — CORE RENDERING & PROCESSING ENGINE
+   --------------------------------------------------------------------
+   All hot-path code: image pipeline, feature tracking, sensor fusion,
+   anchor logic, drawing, and the main loop.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── Status bar helper ───────────────────────────────────────────── */
+function setStatus(text, kind) {
+  if (DOM.status.textContent !== text) DOM.status.textContent = text;
+  const cl = DOM.status.classList;
+  cl.remove('anchored', 'searching', 'degraded', 'lost');
+  if (kind) cl.add(kind);
+}
+
+function showFatal(title, msg, hint) {
+  DOM.fatalTitle.textContent = title;
+  DOM.fatalMsg.textContent = msg;
+  DOM.fatalHint.textContent = hint || '';
+  DOM.fatal.classList.add('show');
+}
+
+/* ── Grayscale + bilinear sampling + gradients ───────────────────── */
+function rgbaToGrayInto(rgba, w, h, out) {
+  const len = w * h;
+  for (let p = 0, i = 0; p < len; p++, i += 4) {
+    out[p] = 0.299 * rgba[i] + 0.587 * rgba[i + 1] + 0.114 * rgba[i + 2];
   }
-  cand.sort((a,b)=>b.score-a.score);
-  const sel = []; const md2 = minDist*minDist;
-  outer: for (const c of cand) {
-    for (const s of sel) {
-      const dx=c.x-s.x, dy=c.y-s.y;
-      if (dx*dx+dy*dy < md2) continue outer;
+}
+
+function sample(gray, w, h, x, y) {
+  if (x < 0 || x >= w - 1 || y < 0 || y >= h - 1) return 0;
+  const x0 = x | 0;
+  const y0 = y | 0;
+  const fx = x - x0;
+  const fy = y - y0;
+  const i = y0 * w + x0;
+  const w0 = w;
+  return (1 - fx) * (1 - fy) * gray[i] +
+                fx * (1 - fy) * gray[i + 1] +
+         (1 - fx) *       fy  * gray[i + w0] +
+                fx *       fy  * gray[i + w0 + 1];
+}
+
+function gradX(g, w, h, x, y) {
+  return 0.5 * (sample(g, w, h, x + 1, y) - sample(g, w, h, x - 1, y));
+}
+function gradY(g, w, h, x, y) {
+  return 0.5 * (sample(g, w, h, x, y + 1) - sample(g, w, h, x, y - 1));
+}
+
+/* ── Shi-Tomasi corner detector ──────────────────────────────────── */
+function detectShiTomasi(gray, w, h) {
+  const winSize  = CONFIG.ST_WIN_SIZE;
+  const minScore = CONFIG.ST_MIN_SCORE;
+  const minDist  = CONFIG.FEATURE_MIN_DIST_PX;
+  const maxFeats = CONFIG.MAX_FEATURES;
+  const skip     = CONFIG.ST_SKIP;
+  const border   = winSize + 2;
+  const md2      = minDist * minDist;
+  const cand     = [];
+
+  for (let y = border; y < h - border; y += skip) {
+    for (let x = border; x < w - border; x += skip) {
+      let Sxx = 0, Syy = 0, Sxy = 0;
+      for (let dy = -winSize; dy <= winSize; dy++) {
+        for (let dx = -winSize; dx <= winSize; dx++) {
+          const gx = gradX(gray, w, h, x + dx, y + dy);
+          const gy = gradY(gray, w, h, x + dx, y + dy);
+          Sxx += gx * gx; Syy += gy * gy; Sxy += gx * gy;
+        }
+      }
+      const tr   = Sxx + Syy;
+      const det  = Sxx * Syy - Sxy * Sxy;
+      const disc = Math.sqrt(Math.max(0, tr * tr / 4 - det));
+      const lambdaMin = tr / 2 - disc;
+      const score = lambdaMin / (winSize * winSize * 4);
+      if (score > minScore) cand.push({ x, y, score });
+    }
+  }
+  cand.sort((a, b) => b.score - a.score);
+
+  const sel = [];
+  outer:
+  for (let i = 0; i < cand.length; i++) {
+    const c = cand[i];
+    for (let j = 0; j < sel.length; j++) {
+      const s = sel[j];
+      const dx = c.x - s.x, dy = c.y - s.y;
+      if (dx * dx + dy * dy < md2) continue outer;
     }
     sel.push(c);
     if (sel.length >= maxFeats) break;
@@ -2237,768 +2709,895 @@ function detectShiTomasi(gray, w, h, opts) {
   return sel;
 }
 
-function trackLK(g1, g2, features, w, h, opts) {
-  opts = opts || {};
-  const wr = opts.winRadius || 4;
-  const maxIter = opts.maxIter || 8;
-  const eps = opts.eps || 0.05;
-  const maxRes = opts.maxResidual || 40;
-  const out = [];
-  for (const f of features) {
-    let dx=0, dy=0, ok=true;
-    let Gxx=0, Gyy=0, Gxy=0;
-    const Ix=[], Iy=[], I1=[];
-    for (let py=-wr; py<=wr; py++) for (let px=-wr; px<=wr; px++) {
-      const sx=f.x+px, sy=f.y+py;
-      const ix = gradX(g1,w,h,sx,sy), iy = gradY(g1,w,h,sx,sy);
-      Ix.push(ix); Iy.push(iy); I1.push(sample(g1,w,h,sx,sy));
-      Gxx+=ix*ix; Gyy+=iy*iy; Gxy+=ix*iy;
-    }
-    const det = Gxx*Gyy-Gxy*Gxy;
-    if (det < 1e-3) { out.push({x:f.x,y:f.y,ok:false}); continue; }
-    const invDet = 1/det;
-    for (let iter=0; iter<maxIter; iter++) {
-      let bx=0, by=0; let idx=0;
-      for (let py=-wr; py<=wr; py++) for (let px=-wr; px<=wr; px++) {
-        const I2 = sample(g2,w,h,f.x+px+dx,f.y+py+dy);
-        const dI = I1[idx]-I2;
-        bx += Ix[idx]*dI; by += Iy[idx]*dI;
+/* Build feature object — pre-allocates trail buffer once per feature. */
+function makeFeature(x, y) {
+  return {
+    x, y, age: 0,
+    trail: new Float32Array(CONFIG.TRAIL_LEN * 2),
+    trailLen: 0,
+  };
+}
+
+/* Push (x,y) into a feature's trail (ring-style, drop oldest). */
+function pushTrail(feat, x, y) {
+  const max = CONFIG.TRAIL_LEN;
+  const t = feat.trail;
+  if (feat.trailLen < max) {
+    const i = feat.trailLen * 2;
+    t[i] = x; t[i + 1] = y;
+    feat.trailLen++;
+  } else {
+    // shift down: drop oldest, append newest
+    for (let i = 2; i < max * 2; i++) t[i - 2] = t[i];
+    t[(max - 1) * 2]     = x;
+    t[(max - 1) * 2 + 1] = y;
+  }
+}
+
+/* ── Lucas-Kanade tracker (writes into pre-allocated output array) ─ */
+function trackLK(g1, g2, features, w, h, out) {
+  const wr      = CONFIG.LK_WIN_RADIUS;
+  const maxIter = CONFIG.LK_MAX_ITER;
+  const eps     = 0.05;
+  const maxRes  = CONFIG.LK_MAX_RESIDUAL;
+  out.length = 0;
+
+  // Local Float32Array workspaces (per feature). Allocated once per call,
+  // not per feature, since (2*wr+1)^2 is small (here 81 floats).
+  const winN = (2 * wr + 1) * (2 * wr + 1);
+  const Ix = new Float32Array(winN);
+  const Iy = new Float32Array(winN);
+  const I1 = new Float32Array(winN);
+
+  for (let fi = 0; fi < features.length; fi++) {
+    const f = features[fi];
+    let dx = 0, dy = 0, ok = true;
+    let Gxx = 0, Gyy = 0, Gxy = 0;
+    let idx = 0;
+    for (let py = -wr; py <= wr; py++) {
+      for (let px = -wr; px <= wr; px++) {
+        const sx = f.x + px, sy = f.y + py;
+        const ix = gradX(g1, w, h, sx, sy);
+        const iy = gradY(g1, w, h, sx, sy);
+        Ix[idx] = ix; Iy[idx] = iy;
+        I1[idx] = sample(g1, w, h, sx, sy);
+        Gxx += ix * ix; Gyy += iy * iy; Gxy += ix * iy;
         idx++;
       }
-      const vx = (Gyy*bx-Gxy*by)*invDet;
-      const vy = (Gxx*by-Gxy*bx)*invDet;
-      dx += vx; dy += vy;
-      if (Math.abs(vx)<eps && Math.abs(vy)<eps) break;
     }
-    let res=0; let idx=0;
-    for (let py=-wr; py<=wr; py++) for (let px=-wr; px<=wr; px++) {
-      const d = I1[idx]-sample(g2,w,h,f.x+px+dx,f.y+py+dy);
-      res += d*d; idx++;
-    }
-    res = Math.sqrt(res/I1.length);
-    if (res > maxRes) ok = false;
-    const nx = f.x+dx, ny = f.y+dy;
-    if (nx<wr || nx>w-wr-1 || ny<wr || ny>h-wr-1) ok = false;
-    out.push({x:nx, y:ny, ok, residual:res});
-  }
-  return out;
-}
+    const det = Gxx * Gyy - Gxy * Gxy;
+    if (det < 1e-3) { out.push({ x: f.x, y: f.y, ok: false }); continue; }
+    const invDet = 1 / det;
 
-// ═══════════════════════════════════════════════
-// IMU
-// ═══════════════════════════════════════════════
-const IMU = { a:0, b:0, g:0, ready:false };
-
-function onOrientation(e) {
-  if (e.alpha === null && e.beta === null) return;
-  IMU.a = e.alpha || 0; IMU.b = e.beta || 0; IMU.g = e.gamma || 0;
-  IMU.ready = true;
-}
-
-async function requestGyro() {
-  if (typeof DeviceOrientationEvent !== 'undefined' &&
-      typeof DeviceOrientationEvent.requestPermission === 'function') {
-    try {
-      const r = await DeviceOrientationEvent.requestPermission();
-      if (r === 'granted') {
-        window.addEventListener('deviceorientation', onOrientation, true);
-        return true;
+    for (let iter = 0; iter < maxIter; iter++) {
+      let bx = 0, by = 0;
+      let k = 0;
+      for (let py = -wr; py <= wr; py++) {
+        for (let px = -wr; px <= wr; px++) {
+          const I2 = sample(g2, w, h, f.x + px + dx, f.y + py + dy);
+          const dI = I1[k] - I2;
+          bx += Ix[k] * dI; by += Iy[k] * dI;
+          k++;
+        }
       }
-    } catch(e){}
-    return false;
-  }
-  window.addEventListener('deviceorientation', onOrientation, true);
-  return true;
-}
+      const vx = (Gyy * bx - Gxy * by) * invDet;
+      const vy = (Gxx * by - Gxy * bx) * invDet;
+      dx += vx; dy += vy;
+      if (Math.abs(vx) < eps && Math.abs(vy) < eps) break;
+    }
 
-function imuToCamQuat() {
+    let res = 0, k = 0;
+    for (let py = -wr; py <= wr; py++) {
+      for (let px = -wr; px <= wr; px++) {
+        const d = I1[k] - sample(g2, w, h, f.x + px + dx, f.y + py + dy);
+        res += d * d; k++;
+      }
+    }
+    res = Math.sqrt(res / winN);
+    if (res > maxRes) ok = false;
+    const nx = f.x + dx, ny = f.y + dy;
+    if (nx < wr || nx > w - wr - 1 || ny < wr || ny > h - wr - 1) ok = false;
+    out.push({ x: nx, y: ny, ok, residual: res });
+  }
+}
+/* Persistent output buffer for trackLK so we don't allocate one per tick. */
+const _trackLKOut = [];
+
+/* ── IMU sample → camera-space quaternion (writes into out) ──────── */
+function imuToCamQuat(out) {
   const a = THREE.MathUtils.degToRad(IMU.a);
   const b = THREE.MathUtils.degToRad(IMU.b);
   const g = THREE.MathUtils.degToRad(IMU.g);
-  const qDev = new THREE.Quaternion();
-  qDev.setFromEuler(new THREE.Euler(b, a, -g, 'YXZ'));
-  const align = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1,0,0), -Math.PI/2);
-  return qDev.multiply(align);
+  _S.euler.set(b, a, -g, 'YXZ');
+  _S.qDev.setFromEuler(_S.euler);
+  out.copy(_S.qDev).multiply(_S.alignQuat);
+  return out;
 }
 
-// ═══════════════════════════════════════════════
-// APP STATE
-// ═══════════════════════════════════════════════
-const OF_W = 320;
-let OF_H;
-let MARKER_SIZE_M = 0.05;
-
-const video    = document.getElementById('cam');
-const overlay  = document.getElementById('overlay');
-const overCtx  = overlay.getContext('2d');
-const work     = document.getElementById('work');
-const workCtx  = work.getContext('2d', { willReadFrequently:true });
-const c3d      = document.getElementById('c3d');
-
-let detector, posit;
-let renderer, scene, cam3, modelGroup;
-
-const STATE = {
-  camOk: false, threeOk: false,
-  prevGray: null,
-  prevImuQuat: null,
-  features: [],
-  redetectCounter: 0,
-  fpsT:0, frames:0, fps:0,
-  lastT:0,
-  showOF: true,
-  showMarkers: true,
-};
-
-const ANCHOR = {
-  set: false,
-  modelMatrix: new THREE.Matrix4(),
-  // Camera position in WORLD frame. Updated by optical flow translation.
-  camPos: new THREE.Vector3(),
-  // Target position (chased by smoothCamPos for soft re-anchoring).
-  targetCamPos: new THREE.Vector3(),
-  // Distance to scene (m) — used to convert pixel flow to metres.
-  sceneDistance: 1.5,
-  // Timestamp of last successful marker-driven re-anchor.
-  lastMarkerT: 0,
-};
-
-// ── TRACKING QUALITY (Step O) ──
-const TRACK = {
-  state: 'init',          // 'init' | 'ok' | 'degraded' | 'lost'
-  lastFlowOkT: 0,         // last time we had a healthy flow update
-  driftMeters: 0,         // estimated drift since last marker
-  trustScore: 1.0,        // 0..1, decays with time / poor flow
-};
-
-function setStatus(t, kind) {
-  document.getElementById('status').textContent = t;
-  const el = document.getElementById('status');
-  el.classList.remove('anchored','searching');
-  if (kind) el.classList.add(kind);
-}
-
-// ═══════════════════════════════════════════════
-// CAMERA
-// ═══════════════════════════════════════════════
-async function startCamera() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode:'environment', width:{ideal:1280}, height:{ideal:720} },
-      audio: false
-    });
-    video.srcObject = stream;
-    await video.play();
-    STATE.camOk = true;
-    OF_H = Math.round(OF_W * video.videoHeight / video.videoWidth);
-    work.width = OF_W; work.height = OF_H;
-    return true;
-  } catch(e) { setStatus('Camera non disponibile'); return false; }
-}
-
-function getCoverTransform(vw, vh) {
-  const sw = window.innerWidth, sh = window.innerHeight;
-  const vA = vw/vh, sA = sw/sh;
-  let scale, offX=0, offY=0;
-  if (vA > sA) { scale=sh/vh; offX=(sw-vw*scale)/2; }
-  else         { scale=sw/vw; offY=(sh-vh*scale)/2; }
-  return { scale, offX, offY };
-}
-
-function resizeOverlay() {
-  const dpr = window.devicePixelRatio || 1;
-  overlay.width = window.innerWidth * dpr;
-  overlay.height = window.innerHeight * dpr;
-  overlay.style.width = window.innerWidth + 'px';
-  overlay.style.height = window.innerHeight + 'px';
-  overCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-}
-
-// ═══════════════════════════════════════════════
-// THREE.JS
-// ═══════════════════════════════════════════════
+/* ── Three.js scene initialization ───────────────────────────────── */
 function initThree() {
-  renderer = new THREE.WebGLRenderer({ canvas:c3d, alpha:true, antialias:true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setClearColor(0,0);
+  try {
+    renderer = new THREE.WebGLRenderer({
+      canvas: DOM.c3d,
+      alpha: true,
+      antialias: true,
+      powerPreference: 'high-performance',
+    });
+  } catch (e) {
+    showFatal('WebGL non disponibile',
+      'Il dispositivo o il browser non supportano WebGL.',
+      e && e.message ? e.message : '');
+    return false;
+  }
+
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight, false);
+  renderer.setClearColor(0x000000, 0);
 
   scene = new THREE.Scene();
-  cam3 = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.01, 100);
-  cam3.position.set(0,0,0);
+  cam3 = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 100);
+  cam3.position.set(0, 0, 0);
 
   scene.add(new THREE.AmbientLight(0xffffff, 1.0));
   const dir = new THREE.DirectionalLight(0xffffff, 0.5);
-  dir.position.set(2,5,3); scene.add(dir);
+  dir.position.set(2, 5, 3);
+  scene.add(dir);
 
   modelGroup = new THREE.Group();
   modelGroup.visible = false;
   scene.add(modelGroup);
   buildModel(modelGroup);
-  STATE.threeOk = true;
 
-  window.addEventListener('resize', () => {
-    cam3.aspect = window.innerWidth/window.innerHeight;
-    cam3.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    resizeOverlay();
-  });
+  // WebGL context loss / restore — never let the page silently die
+  DOM.c3d.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();
+    setStatus('Contesto WebGL perso — recupero in corso…', 'lost');
+    console.warn('[VIO] WebGL context lost');
+  }, false);
+  DOM.c3d.addEventListener('webglcontextrestored', () => {
+    console.warn('[VIO] WebGL context restored — re-init');
+    initThree();
+    setStatus('Contesto WebGL ripristinato', 'searching');
+  }, false);
+
+  STATE.threeOk = true;
+  return true;
 }
 
 function buildModel(group) {
-  const COL=0x4a9eff, BEAM=0xff8c2e, WALL=0xf5f2eb;
-  MODEL.elements.forEach(el => {
-    let mesh;
+  const COL = 0x4a9eff, BEAM = 0xff8c2e, WALL = 0xf5f2eb;
+  for (const el of MODEL.elements) {
+    let mesh = null;
     if (el.type === 'column') {
       const g = new THREE.CylinderGeometry(el.r, el.r, el.h, 12);
-      mesh = new THREE.Mesh(g, new THREE.MeshPhongMaterial({color:COL, opacity:.55, transparent:true}));
-      mesh.rotation.x = Math.PI/2;
-      mesh.position.set(el.x, el.y, el.z+el.h/2);
-      mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({color:COL})));
+      mesh = new THREE.Mesh(g, new THREE.MeshPhongMaterial({ color: COL, opacity: 0.55, transparent: true }));
+      mesh.rotation.x = Math.PI / 2;
+      mesh.position.set(el.x, el.y, el.z + el.h / 2);
+      mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({ color: COL })));
     } else if (el.type === 'beam' || el.type === 'wall') {
-      const dx=el.x2-el.x1, dy=el.y2-el.y1;
+      const dx = el.x2 - el.x1, dy = el.y2 - el.y1;
       const len = Math.hypot(dx, dy);
-      const w = el.type==='beam' ? el.w : el.t;
-      const h = el.h;
-      const g = new THREE.BoxGeometry(len, w, h);
-      const color = el.type==='beam' ? BEAM : WALL;
-      const op = el.type==='beam' ? .55 : .25;
-      mesh = new THREE.Mesh(g, new THREE.MeshPhongMaterial({color, opacity:op, transparent:true}));
-      mesh.position.set((el.x1+el.x2)/2, (el.y1+el.y2)/2, el.z+h/2);
+      const w   = el.type === 'beam' ? el.w : el.t;
+      const h   = el.h;
+      const g   = new THREE.BoxGeometry(len, w, h);
+      const color = el.type === 'beam' ? BEAM : WALL;
+      const op    = el.type === 'beam' ? 0.55 : 0.25;
+      mesh = new THREE.Mesh(g, new THREE.MeshPhongMaterial({ color, opacity: op, transparent: true }));
+      mesh.position.set((el.x1 + el.x2) / 2, (el.y1 + el.y2) / 2, el.z + h / 2);
       mesh.rotation.z = Math.atan2(dy, dx);
-      mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({color})));
+      mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({ color })));
     }
     if (mesh) group.add(mesh);
-  });
-  MODEL.markers.forEach(mk => {
-    const s = MARKER_SIZE_M;
+  }
+  for (const mk of MODEL.markers) {
+    const s = STATE.markerSizeM;
     const g = new THREE.BoxGeometry(s, s, 0.005);
-    const mesh = new THREE.Mesh(g, new THREE.MeshPhongMaterial({color:0xe8410a, opacity:.9, transparent:true}));
-    mesh.position.set(mk.ax, mk.ay, mk.az);
-    group.add(mesh);
-  });
-  group.add(new THREE.Mesh(new THREE.SphereGeometry(0.05,8,8), new THREE.MeshPhongMaterial({color:0xff0000})));
+    const m = new THREE.Mesh(g, new THREE.MeshPhongMaterial({ color: 0xe8410a, opacity: 0.9, transparent: true }));
+    m.position.set(mk.ax, mk.ay, mk.az);
+    group.add(m);
+  }
+  group.add(new THREE.Mesh(
+    new THREE.SphereGeometry(0.05, 8, 8),
+    new THREE.MeshPhongMaterial({ color: 0xff0000 })
+  ));
   group.add(new THREE.AxesHelper(0.3));
 }
 
-// ═══════════════════════════════════════════════
-// POSIT → THREE
-// ═══════════════════════════════════════════════
-function posit2three(pose) {
-  const R = pose.bestRotation, T = pose.bestTranslation;
-  const m = new THREE.Matrix4();
-  m.set(
+/* ── POSIT pose → THREE.Matrix4 (writes into outMat, returns it) ─── */
+function posit2three(pose, outMat) {
+  const R = pose.bestRotation;
+  const T = pose.bestTranslation;
+  outMat.set(
      R[0][0],  R[0][1], -R[0][2], 0,
      R[1][0],  R[1][1], -R[1][2], 0,
     -R[2][0], -R[2][1],  R[2][2], 0,
-     0,        0,        0,       1
+     0,        0,        0,       1,
   );
-  m.setPosition(new THREE.Vector3(T[0], T[1], -T[2]));
-  return m;
+  _S.v1.set(T[0], T[1], -T[2]);
+  outMat.setPosition(_S.v1);
+  return outMat;
 }
 
-// ═══════════════════════════════════════════════
-// ANCHOR — same logic as Step I, but now camera CAN move
-// ═══════════════════════════════════════════════
-// ═══════════════════════════════════════════════
-// ANCHOR — N: soft re-anchor with low-pass smoothing
-// ═══════════════════════════════════════════════
-// First time we see a marker → hard set ANCHOR.modelMatrix and reset camPos.
-// Subsequent sightings → compute the IMPLIED camera position from the marker
-// pose, and slowly blend ANCHOR.camPos toward it. Same for model placement.
-//
-// Why blend the camera, not the model? Because in our coord system the model
-// lives in WORLD frame and the camera is what moves. Whatever the marker
-// "wants" the camera to be at is the truth; OF drift made us drift away.
-
-const ANCHOR_BLEND_ALPHA = 0.12; // higher = faster correction, more visible snap
-
+/* ── Anchor logic ────────────────────────────────────────────────── */
 function doAnchor(markerId, pose) {
   const mk = MARKER_MAP[markerId];
   if (!mk) return;
 
   const T = pose.bestTranslation;
-  const newSceneDist = Math.sqrt(T[0]*T[0]+T[1]*T[1]+T[2]*T[2]);
+  const newSceneDist = Math.sqrt(T[0] * T[0] + T[1] * T[1] + T[2] * T[2]);
 
-  // Camera-frame pose of the model that this marker implies
-  const markerInCam = posit2three(pose);
-  const markerToOrigin = new THREE.Matrix4().makeTranslation(-mk.ax, -mk.ay, -mk.az);
-  const modelInCam = new THREE.Matrix4().multiplyMatrices(markerInCam, markerToOrigin);
+  // markerInCam (scratch m1) and modelInCam (scratch m2)
+  posit2three(pose, _S.m1);
+  _S.m2.makeTranslation(-mk.ax, -mk.ay, -mk.az);
+  _S.m3.multiplyMatrices(_S.m1, _S.m2);    // modelInCam → _S.m3
 
   if (!ANCHOR.set) {
-    // ── FIRST ANCHOR (hard set) ──
-    const camInWorld = new THREE.Matrix4().makeRotationFromQuaternion(imuToCamQuat());
-    const camPosMat = new THREE.Matrix4().setPosition(ANCHOR.camPos);
-    const camPoseInWorld = new THREE.Matrix4().multiplyMatrices(camPosMat, camInWorld);
-    const modelInWorld = new THREE.Matrix4().multiplyMatrices(camPoseInWorld, modelInCam);
+    // ── HARD anchor ─────────────────────────────────────────────
+    imuToCamQuat(_S.q1);
+    _S.m1.makeRotationFromQuaternion(_S.q1); // camInWorld rot
+    _S.m2.makeTranslation(ANCHOR.camPos.x, ANCHOR.camPos.y, ANCHOR.camPos.z); // camPos T
+    _S.m4.multiplyMatrices(_S.m2, _S.m1);    // camPoseInWorld → _S.m4
+    _S.m1.multiplyMatrices(_S.m4, _S.m3);    // modelInWorld   → _S.m1
 
-    ANCHOR.modelMatrix.copy(modelInWorld);
+    ANCHOR.modelMatrix.copy(_S.m1);
     ANCHOR.set = true;
     ANCHOR.sceneDistance = newSceneDist;
-    ANCHOR.targetCamPos = ANCHOR.camPos.clone();
+    ANCHOR.targetCamPos.copy(ANCHOR.camPos);
 
     modelGroup.matrixAutoUpdate = false;
     modelGroup.matrix.copy(ANCHOR.modelMatrix);
     modelGroup.matrixWorldNeedsUpdate = true;
     modelGroup.visible = true;
   } else {
-    // ── RE-ANCHOR (soft) ──
-    // The marker tells us where the camera WOULD be if there were no drift.
-    // Given fixed model (ANCHOR.modelMatrix) and observed modelInCam,
-    // the camera pose in world satisfies:
-    //   modelInWorld = camPoseInWorld · modelInCam
-    //   camPoseInWorld = modelInWorld · modelInCam⁻¹
-    const modelInCamInv = new THREE.Matrix4().copy(modelInCam).invert();
-    const camPoseInWorld = new THREE.Matrix4()
-      .multiplyMatrices(ANCHOR.modelMatrix, modelInCamInv);
+    // ── SOFT re-anchor ──────────────────────────────────────────
+    _S.m1.copy(_S.m3).invert();                                    // modelInCamInv → _S.m1
+    _S.m2.multiplyMatrices(ANCHOR.modelMatrix, _S.m1);             // camPoseInWorld → _S.m2
+    ANCHOR.targetCamPos.setFromMatrixPosition(_S.m2);
 
-    // Extract position from camPoseInWorld
-    const targetPos = new THREE.Vector3();
-    targetPos.setFromMatrixPosition(camPoseInWorld);
-
-    // Don't snap — set target. The actual camPos will smoothly chase it.
-    ANCHOR.targetCamPos.copy(targetPos);
-
-    // Refresh scene distance for OF scale
     ANCHOR.sceneDistance = ANCHOR.sceneDistance * 0.7 + newSceneDist * 0.3;
-
-    // Record we just saw a known marker (used by tracking quality logic)
     ANCHOR.lastMarkerT = performance.now();
 
-    // Marker contact resets drift estimate
     TRACK.driftMeters = 0;
-    TRACK.trustScore = 1.0;
+    TRACK.trustScore  = 1.0;
   }
 }
 
-// Smoothly drag camPos toward targetCamPos. Called every frame.
 function smoothCamPos() {
-  if (!ANCHOR.targetCamPos) return;
-  const dx = ANCHOR.targetCamPos.x - ANCHOR.camPos.x;
-  const dy = ANCHOR.targetCamPos.y - ANCHOR.camPos.y;
-  const dz = ANCHOR.targetCamPos.z - ANCHOR.camPos.z;
-  const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
-  if (dist < 0.001) return; // already there
-  // If the gap is huge (>2m), snap immediately — probably user teleported
-  if (dist > 2.0) {
-    ANCHOR.camPos.copy(ANCHOR.targetCamPos);
+  const tx = ANCHOR.targetCamPos.x, ty = ANCHOR.targetCamPos.y, tz = ANCHOR.targetCamPos.z;
+  const dx = tx - ANCHOR.camPos.x;
+  const dy = ty - ANCHOR.camPos.y;
+  const dz = tz - ANCHOR.camPos.z;
+  const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  if (dist < 0.001) return;
+  if (dist > CONFIG.ANCHOR_TELEPORT_M) {
+    ANCHOR.camPos.set(tx, ty, tz);
     return;
   }
-  ANCHOR.camPos.x += dx * ANCHOR_BLEND_ALPHA;
-  ANCHOR.camPos.y += dy * ANCHOR_BLEND_ALPHA;
-  ANCHOR.camPos.z += dz * ANCHOR_BLEND_ALPHA;
+  const a = CONFIG.ANCHOR_BLEND_ALPHA;
+  ANCHOR.camPos.x += dx * a;
+  ANCHOR.camPos.y += dy * a;
+  ANCHOR.camPos.z += dz * a;
 }
 
 function updateCamera() {
   if (!IMU.ready) return;
   smoothCamPos();
-  cam3.quaternion.copy(imuToCamQuat());
+  imuToCamQuat(_S.q1);
+  cam3.quaternion.copy(_S.q1);
   cam3.position.copy(ANCHOR.camPos);
 }
 
-// ═══════════════════════════════════════════════
-// TRACKING QUALITY (Step O)
-// ═══════════════════════════════════════════════
-// We classify the tracking state into 4 levels and use it to:
-//   • change status-bar color
-//   • fade the model opacity when degraded/lost
-//   • show a hint "torna a un marker" when lost
-//
-// Inputs to the classifier (per frame):
-//   • Number of OF feature points
-//   • Time since last successful flow update
-//   • Time since last marker re-anchor
-//   • Accumulated drift in metres
-//
-// Output: TRACK.state and TRACK.trustScore (0..1).
-
+/* ── Tracking quality (Step O) ──────────────────────────────────── */
 function updateTrackingQuality(now) {
   if (!ANCHOR.set) {
     TRACK.state = 'init';
     TRACK.trustScore = 1.0;
     return;
   }
+  const nFeat       = STATE.features.length;
+  const sinceFlow   = TRACK.lastFlowOkT   ? (now - TRACK.lastFlowOkT)   : 9999;
+  const sinceMarker = ANCHOR.lastMarkerT  ? (now - ANCHOR.lastMarkerT)  : 9999;
 
-  const nFeat = STATE.features.length;
-  const sinceFlow = TRACK.lastFlowOkT ? (now - TRACK.lastFlowOkT) : 9999;
-  const sinceMarker = ANCHOR.lastMarkerT ? (now - ANCHOR.lastMarkerT) : 9999;
-
-  // Trust decays:
-  //   - linearly with drift (0.5m → lose half trust)
-  //   - linearly with time since last marker (>30s → halve)
-  //   - sharply when flow stalls (>500ms without good flow)
   let trust = 1.0;
-  trust *= Math.max(0, 1 - TRACK.driftMeters / 1.5);  // 1.5m drift → 0 trust
-  trust *= Math.max(0.2, 1 - sinceMarker / 60000);    // 1 min → 0.2 trust
-  if (sinceFlow > 500) trust *= 0.4;
-  if (sinceFlow > 1500) trust *= 0.1;
+  trust *= Math.max(0,    1 - TRACK.driftMeters / CONFIG.DRIFT_HALF_M);
+  trust *= Math.max(0.2,  1 - sinceMarker / CONFIG.MARKER_TIMEOUT_MS);
+  if (sinceFlow > CONFIG.FLOW_OK_MS)   trust *= 0.4;
+  if (sinceFlow > CONFIG.FLOW_LOST_MS) trust *= 0.1;
   TRACK.trustScore = Math.max(0, Math.min(1, trust));
 
-  // State buckets
   let state;
-  if (nFeat < 5 || sinceFlow > 1500) state = 'lost';
-  else if (nFeat < 20 || trust < 0.5 || sinceFlow > 400) state = 'degraded';
+  if (nFeat < CONFIG.N_FEAT_LOST || sinceFlow > CONFIG.FLOW_LOST_MS) state = 'lost';
+  else if (nFeat < CONFIG.N_FEAT_DEGRADED ||
+           trust < CONFIG.TRUST_DEGRADED ||
+           sinceFlow > 400) state = 'degraded';
   else state = 'ok';
   TRACK.state = state;
 
-  // Apply visual feedback
   applyTrackingVisuals(state);
 }
 
 function applyTrackingVisuals(state) {
-  const statusEl = document.getElementById('status');
-  statusEl.classList.remove('anchored','searching','degraded','lost');
-
-  // Model opacity reflects trust
   if (modelGroup && modelGroup.visible) {
-    modelGroup.traverse(obj => {
-      if (obj.material && obj.material.transparent) {
-        const baseOp = obj.material.userData.baseOpacity ?? obj.material.opacity;
-        if (obj.material.userData.baseOpacity === undefined) {
-          obj.material.userData.baseOpacity = obj.material.opacity;
+    modelGroup.traverse((obj) => {
+      const mat = obj.material;
+      if (mat && mat.transparent) {
+        if (mat.userData.baseOpacity === undefined) {
+          mat.userData.baseOpacity = mat.opacity;
         }
-        // Multiply base opacity by trust (clamped to never disappear)
-        obj.material.opacity = Math.max(0.15, obj.material.userData.baseOpacity * TRACK.trustScore);
+        mat.opacity = Math.max(0.15, mat.userData.baseOpacity * TRACK.trustScore);
       }
     });
   }
 
-  if (state === 'ok') {
-    statusEl.classList.add('anchored');
-    setStatus('Tracking — esplora liberamente', 'anchored');
-  } else if (state === 'degraded') {
-    statusEl.classList.add('degraded');
-    setStatus(`Tracking debole (drift ~${TRACK.driftMeters.toFixed(2)}m)`, 'degraded');
-  } else if (state === 'lost') {
-    statusEl.classList.add('lost');
-    setStatus('TRACKING PERSO — torna a un marker', 'lost');
-  }
+  if      (state === 'ok')       setStatus('Tracking — esplora liberamente', 'anchored');
+  else if (state === 'degraded') setStatus(`Tracking debole (drift ~${TRACK.driftMeters.toFixed(2)}m)`, 'degraded');
+  else if (state === 'lost')     setStatus('Tracking perso — torna a un marker', 'lost');
 }
 
-// ═══════════════════════════════════════════════
-// OPTICAL FLOW → CAMERA TRANSLATION
-// ═══════════════════════════════════════════════
-//
-// Core idea:
-//   For each tracked feature, the observed flow (Δu, Δv) in pixels is a sum of:
-//     1. Flow due to camera ROTATION (we know this from IMU)
-//     2. Flow due to camera TRANSLATION (we want this)
-//   We subtract the rotation-induced flow to get the translation-only flow.
-//   Then we estimate translation in METRES via the scene depth (Z).
-//
-// For pure translation, a feature at pixel (u, v) on a plane at depth Z moves by:
-//     Δu = (fx · ΔX_cam + u · ΔZ_cam) / Z
-//     Δv = (fy · ΔY_cam + v · ΔZ_cam) / Z
-//
-// For small movements we can solve this for (ΔX, ΔY, ΔZ) using least squares
-// across all feature pairs. For simplicity in this step, we approximate with:
-//   - Assume ΔZ_cam ≈ 0 (no forward/backward motion). Only XY translation.
-//   - Then Δu = fx · ΔX / Z   →   ΔX = Z · Δu / fx
-//                             →   ΔY = Z · Δv / fy
-//   - Take median flow as robust estimate.
-//
-// Rotation compensation: from delta IMU quaternion, compute expected flow at
-// each feature and subtract.
+/* ── Optical flow → camera translation ───────────────────────────── */
+function computeTranslationFromFlow(flow, focalPx, out) {
+  out.ok = false;
+  const n = flow.length;
+  if (n < 8) return out;
 
-function computeTranslationFromFlow(flowVectors, focalPx) {
-  // flowVectors: array of {u, v, du, dv} in OF image coordinates (320×OF_H)
-  // u,v are relative to image CENTER (so u=0 is middle of image)
-  if (flowVectors.length < 8) return null;
+  // Use the global Float32Array sort buffer (zero new alloc)
+  const du = _S.sortDu, dv = _S.sortDv;
+  if (du.length < n) { _S.sortDu = new Float32Array(n * 2); _S.sortDv = new Float32Array(n * 2); }
+  const duB = _S.sortDu, dvB = _S.sortDv;
+  for (let i = 0; i < n; i++) { duB[i] = flow[i].du; dvB[i] = flow[i].dv; }
+  // Sort just the slice we use
+  const duSlice = duB.subarray(0, n);
+  const dvSlice = dvB.subarray(0, n);
+  duSlice.sort();
+  dvSlice.sort();
+  const med_du = duSlice[n >> 1];
+  const med_dv = dvSlice[n >> 1];
 
-  // Median flow (robust against outliers)
-  const dus = flowVectors.map(f => f.du).sort((a,b)=>a-b);
-  const dvs = flowVectors.map(f => f.dv).sort((a,b)=>a-b);
-  const median_du = dus[Math.floor(dus.length/2)];
-  const median_dv = dvs[Math.floor(dvs.length/2)];
+  // MAD — in-place computed against medians
+  for (let i = 0; i < n; i++) duSlice[i] = Math.abs(flow[i].du - med_du);
+  for (let i = 0; i < n; i++) dvSlice[i] = Math.abs(flow[i].dv - med_dv);
+  duSlice.sort();
+  dvSlice.sort();
+  const sigU = (duSlice[n >> 1] * 1.4826) || 1;
+  const sigV = (dvSlice[n >> 1] * 1.4826) || 1;
+  const lu = 3 * sigU, lv = 3 * sigV;
 
-  // Apply MAD outlier filter
-  const mad_u = dus.map(d => Math.abs(d - median_du)).sort((a,b)=>a-b);
-  const mad_v = dvs.map(d => Math.abs(d - median_dv)).sort((a,b)=>a-b);
-  const sigmau = mad_u[Math.floor(mad_u.length/2)] * 1.4826 || 1;
-  const sigmav = mad_v[Math.floor(mad_v.length/2)] * 1.4826 || 1;
-
-  let sumDu=0, sumDv=0, n=0;
-  for (const f of flowVectors) {
-    if (Math.abs(f.du - median_du) > 3*sigmau) continue;
-    if (Math.abs(f.dv - median_dv) > 3*sigmav) continue;
-    sumDu += f.du; sumDv += f.dv; n++;
+  let sumDu = 0, sumDv = 0, k = 0;
+  for (let i = 0; i < n; i++) {
+    const f = flow[i];
+    if (Math.abs(f.du - med_du) > lu) continue;
+    if (Math.abs(f.dv - med_dv) > lv) continue;
+    sumDu += f.du; sumDv += f.dv; k++;
   }
-  if (n < 5) return null;
-  const meanDu = sumDu / n;
-  const meanDv = sumDv / n;
+  if (k < 5) return out;
+  const meanDu = sumDu / k;
+  const meanDv = sumDv / k;
 
-  // Convert pixel flow to metres of camera translation.
-  // Flow in OF image pixels (320 wide). focalPx is in full-image pixels.
-  // Scale focalPx to OF resolution:
-  const focalPxOf = focalPx * (OF_W / video.videoWidth);
-
-  // ΔX_cam = -Z · Δu / fx   (negative because feature moves opposite to camera)
+  const focalPxOf = focalPx * (STATE.OF_W / DOM.video.videoWidth);
   const Z = ANCHOR.sceneDistance;
   const dX = -Z * meanDu / focalPxOf;
-  const dY = -Z * meanDv / focalPxOf;   // image-down direction in OF
-  // Convert image-Y (down positive) to math-Y (up positive): negate
-  // Actually camera Y in Three.js is "up", and image Y is "down". So when feature
-  // moves DOWN in image (du > 0... wait dv > 0 means down), it means camera moved UP.
-  // So dY_cam_world_up = +Z · dv / fy. But we already have minus from above.
-  // Let me redo: feature moves down → camera moved up → cam Y is +.
-  //   flow_dv > 0 means feature moved DOWN.
-  //   ΔY_cam (camera-up) = +Z · dv / fy → camera moved UP.
-  // But our formula gave dY = -Z·dv/f. So flip sign on dY.
-  return { dx: dX, dy: -dY, dz: 0 };
+  const dY = -Z * meanDv / focalPxOf;
+
+  out.dx = dX;
+  out.dy = -dY;
+  out.dz = 0;
+  out.ok = true;
+  return out;
 }
 
-// Project flow expected from a pure rotation. We use IMU delta to compute
-// where each old feature should be in the new frame if NO translation happened.
-function rotationFlowAtPoint(u, v, focalPx, deltaQuat) {
-  // Backproject pixel to a direction in camera space (depth = 1)
-  // Camera intrinsics in OF resolution
-  const focalPxOf = focalPx * (OF_W / video.videoWidth);
-  const x = u / focalPxOf;
-  const y = -v / focalPxOf; // image down → camera up
-  const dir = new THREE.Vector3(x, y, -1).normalize();
-  // Rotate by deltaQuat⁻¹ to find where this direction was BEFORE rotation
-  // Actually: if camera rotates by Q from frame1 to frame2, a ray fixed in WORLD
-  // appears rotated by Q⁻¹ in camera space. So the new pixel position is the
-  // backprojection of Q⁻¹·dir.
-  const qInv = deltaQuat.clone().invert();
-  const newDir = dir.clone().applyQuaternion(qInv);
-  // Forward project. newDir.z should be negative (in front of camera)
-  if (newDir.z >= -0.001) return null;
-  const newU = -focalPxOf * newDir.x / newDir.z;
-  const newV =  focalPxOf * newDir.y / newDir.z; // flip back to image-down
-  return { u: newU, v: newV };
+function rotationFlowAtPoint(u, v, focalPx, deltaQuat, out) {
+  const focalPxOf = focalPx * (STATE.OF_W / DOM.video.videoWidth);
+  const x =  u / focalPxOf;
+  const y = -v / focalPxOf;
+  _S.v3.set(x, y, -1).normalize();
+  _S.qInv.copy(deltaQuat).invert();
+  _S.v3.applyQuaternion(_S.qInv);
+  if (_S.v3.z >= -0.001) { out.ok = false; return out; }
+  out.u = -focalPxOf * _S.v3.x / _S.v3.z;
+  out.v =  focalPxOf * _S.v3.y / _S.v3.z;
+  out.ok = true;
+  return out;
 }
 
-// ═══════════════════════════════════════════════
-// DRAW
-// ═══════════════════════════════════════════════
+/* ── Camera→viewport "cover" transform (centre-crop) ─────────────── */
+function getCoverTransform(vw, vh, outT) {
+  const sw = window.innerWidth, sh = window.innerHeight;
+  const vA = vw / vh, sA = sw / sh;
+  let scale, offX = 0, offY = 0;
+  if (vA > sA) { scale = sh / vh; offX = (sw - vw * scale) / 2; }
+  else         { scale = sw / vw; offY = (sh - vh * scale) / 2; }
+  outT.scale = scale; outT.offX = offX; outT.offY = offY;
+  return outT;
+}
+const _T_OUT = { scale: 1, offX: 0, offY: 0 };
+
+/* ── Overlay resize ──────────────────────────────────────────────── */
+function resizeOverlay() {
+  const dpr = window.devicePixelRatio || 1;
+  DOM.overlay.width  = window.innerWidth  * dpr;
+  DOM.overlay.height = window.innerHeight * dpr;
+  DOM.overlay.style.width  = window.innerWidth  + 'px';
+  DOM.overlay.style.height = window.innerHeight + 'px';
+  overCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+/* ── 2D overlay drawing (OF features + trail + marker outlines) ── */
 function draw2D(markers, features, T) {
   overCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+  const ofToVid = DOM.video.videoWidth / STATE.OF_W;
 
-  // Optical flow points
-  if (STATE.showOF && features) {
-    const ofToVid = video.videoWidth / OF_W;
-    for (const f of features) {
-      const sx = f.x * ofToVid * T.scale + T.offX;
-      const sy = f.y * ofToVid * T.scale + T.offY;
-      overCtx.fillStyle = '#1a9e5c';
-      overCtx.beginPath(); overCtx.arc(sx, sy, 3, 0, Math.PI*2); overCtx.fill();
+  // ── ODOMETRY TRAIL — re-activated (Step N+O) ─────────────────
+  // For each tracked feature, draw the polyline of its recent positions.
+  // Old positions fade; newest is brightest. This makes optical-flow
+  // odometry visually self-explanatory.
+  if (STATE.showTrail && features) {
+    overCtx.lineCap = 'round';
+    overCtx.lineJoin = 'round';
+    for (let i = 0; i < features.length; i++) {
+      const f = features[i];
+      if (f.trailLen < 2) continue;
+      const t = f.trail;
+      // Draw as a single path (no per-segment alpha — cheaper),
+      // then optionally overlay newest segment brighter.
+      overCtx.beginPath();
+      const tx0 = t[0] * ofToVid * T.scale + T.offX;
+      const ty0 = t[1] * ofToVid * T.scale + T.offY;
+      overCtx.moveTo(tx0, ty0);
+      for (let p = 1; p < f.trailLen; p++) {
+        const ix = p * 2;
+        overCtx.lineTo(
+          t[ix]     * ofToVid * T.scale + T.offX,
+          t[ix + 1] * ofToVid * T.scale + T.offY,
+        );
+      }
+      // Final stroke segment from last-trail to current feature pos
+      overCtx.lineTo(
+        f.x * ofToVid * T.scale + T.offX,
+        f.y * ofToVid * T.scale + T.offY,
+      );
+      overCtx.strokeStyle = 'rgba(232,144,10,0.55)';
+      overCtx.lineWidth = 1.4;
+      overCtx.stroke();
     }
   }
 
-  // Markers
-  if (STATE.showMarkers && markers) {
-    for (const m of markers) {
-      const pts = m.corners.map(c => ({ x:c.x*T.scale+T.offX, y:c.y*T.scale+T.offY }));
+  // ── Current feature positions ────────────────────────────────
+  if (STATE.showOF && features) {
+    overCtx.fillStyle = '#1a9e5c';
+    for (let i = 0; i < features.length; i++) {
+      const f = features[i];
+      const sx = f.x * ofToVid * T.scale + T.offX;
+      const sy = f.y * ofToVid * T.scale + T.offY;
       overCtx.beginPath();
-      overCtx.moveTo(pts[0].x, pts[0].y);
-      for (let i=1; i<4; i++) overCtx.lineTo(pts[i].x, pts[i].y);
+      overCtx.arc(sx, sy, 3, 0, Math.PI * 2);
+      overCtx.fill();
+    }
+  }
+
+  // ── ArUco marker outlines ────────────────────────────────────
+  if (STATE.showMarkers && markers) {
+    overCtx.lineWidth = 3;
+    for (let i = 0; i < markers.length; i++) {
+      const m = markers[i];
+      const c = m.corners;
+      overCtx.beginPath();
+      overCtx.moveTo(c[0].x * T.scale + T.offX, c[0].y * T.scale + T.offY);
+      for (let k = 1; k < 4; k++) {
+        overCtx.lineTo(c[k].x * T.scale + T.offX, c[k].y * T.scale + T.offY);
+      }
       overCtx.closePath();
       overCtx.strokeStyle = MARKER_MAP[m.id] ? '#1a9e5c' : '#f0a500';
-      overCtx.lineWidth = 3; overCtx.stroke();
+      overCtx.stroke();
     }
   }
 }
 
-// ═══════════════════════════════════════════════
-// MAIN LOOP
-// ═══════════════════════════════════════════════
-let lastDetect = 0;
-const ARUCO_INTERVAL = 200; // ms — slower than OF
-const OF_INTERVAL = 80;
-
+/* ── Re-detect helpers ───────────────────────────────────────────── */
 function detectFeatures(gray) {
-  const c = detectShiTomasi(gray, OF_W, OF_H, { winSize:4, minScore:5, minDist:14, maxFeats:80, skip:4 });
-  return c.map(p => ({ x:p.x, y:p.y, age:0 }));
+  const c = detectShiTomasi(gray, STATE.OF_W, STATE.OF_H);
+  const out = new Array(c.length);
+  for (let i = 0; i < c.length; i++) out[i] = makeFeature(c[i].x, c[i].y);
+  return out;
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   MAIN ANIMATION LOOP — zero-allocation hot path
+   --------------------------------------------------------------------
+   All per-tick scratch lives in:
+     • _S.*           — Three.js scratch objects
+     • STATE.gray*    — Float32 image buffers (allocated once)
+     • _trackLKOut    — LK output array (length reset each call)
+     • _flowVectors   — flow vector pool (reused via .length=0)
+     • _residualFlow  — residual pool
+     • _T_OUT         — transform output object
+   ──────────────────────────────────────────────────────────────────── */
+const _flowVectors    = [];
+const _residualFlow   = [];
+/* lightweight ring of pre-allocated flow vector slots */
+const _flowVectorPool = [];
+function getFlowVecSlot(idx, pool) {
+  if (idx < pool.length) return pool[idx];
+  const o = { u: 0, v: 0, du: 0, dv: 0 };
+  pool.push(o);
+  return o;
 }
 
 function loop(now) {
   requestAnimationFrame(loop);
   if (!STATE.camOk || !STATE.threeOk) return;
-  if (now - STATE.lastT < OF_INTERVAL) {
-    renderer.render(scene, cam3); return;
+
+  // ── Throttle the OF pipeline; still render the scene every frame ─
+  if (now - STATE.lastTickT < CONFIG.OF_INTERVAL_MS) {
+    renderer.render(scene, cam3);
+    return;
   }
-  STATE.lastT = now;
+  STATE.lastTickT = now;
 
-  // ── Grab downscaled grayscale frame ──
-  workCtx.drawImage(video, 0, 0, OF_W, OF_H);
-  const img = workCtx.getImageData(0, 0, OF_W, OF_H);
-  const gray = rgbaToGray(img.data, OF_W, OF_H);
+  const video = DOM.video;
 
-  // ── ARUCO DETECTION (slower cadence, full resolution) ──
+  // ── Grab downscaled grayscale frame (into pre-allocated buffer) ─
+  workCtx.drawImage(video, 0, 0, STATE.OF_W, STATE.OF_H);
+  const img = workCtx.getImageData(0, 0, STATE.OF_W, STATE.OF_H);
+  rgbaToGrayInto(img.data, STATE.OF_W, STATE.OF_H, STATE.grayCur);
+
+  // ── ArUco detection (slower cadence, full res) ──────────────────
   let markers = null;
-  if (now - lastDetect >= ARUCO_INTERVAL && detector) {
-    lastDetect = now;
-    work.width = video.videoWidth; work.height = video.videoHeight;
+  if (now - STATE.lastDetectT >= CONFIG.ARUCO_INTERVAL_MS && detector) {
+    STATE.lastDetectT = now;
+    DOM.work.width  = video.videoWidth;
+    DOM.work.height = video.videoHeight;
     workCtx.drawImage(video, 0, 0);
     try {
       const fullImg = workCtx.getImageData(0, 0, video.videoWidth, video.videoHeight);
       markers = detector.detect(fullImg);
-    } catch(e) {}
-    // Restore OF working size
-    work.width = OF_W; work.height = OF_H;
-    workCtx.drawImage(video, 0, 0, OF_W, OF_H);
+    } catch (e) {
+      console.warn('[VIO] aruco detect failed:', e);
+    }
+    // Restore OF working size for the next tick
+    DOM.work.width  = STATE.OF_W;
+    DOM.work.height = STATE.OF_H;
+    workCtx.drawImage(video, 0, 0, STATE.OF_W, STATE.OF_H);
 
-    // POSIT on first known marker → re-anchor
     if (markers && markers.length) {
       let used = null;
-      for (const m of markers) if (MARKER_MAP[m.id]) { used = m; break; }
+      for (let i = 0; i < markers.length; i++) {
+        if (MARKER_MAP[markers[i].id]) { used = markers[i]; break; }
+      }
       if (used) {
-        const focalPx = video.videoWidth * 0.85;
-        if (!posit) posit = new POS.Posit(MARKER_SIZE_M, focalPx);
-        const corners = used.corners.map(c => ({ x: c.x - video.videoWidth/2, y: video.videoHeight/2 - c.y }));
+        const focalPx = video.videoWidth * CONFIG.FOCAL_FACTOR;
+        if (!posit) posit = new POS.Posit(STATE.markerSizeM, focalPx);
+        const halfW = video.videoWidth / 2;
+        const halfH = video.videoHeight / 2;
+        const pc = _S.positCorners;
+        const uc = used.corners;
+        pc[0].x = uc[0].x - halfW; pc[0].y = halfH - uc[0].y;
+        pc[1].x = uc[1].x - halfW; pc[1].y = halfH - uc[1].y;
+        pc[2].x = uc[2].x - halfW; pc[2].y = halfH - uc[2].y;
+        pc[3].x = uc[3].x - halfW; pc[3].y = halfH - uc[3].y;
         try {
-          const pose = posit.pose(corners);
+          const pose = posit.pose(pc);
           if (pose) {
-            // First time → set anchor. After that → keep refining.
             doAnchor(used.id, pose);
-            document.getElementById('i-id').textContent =
-              `${used.id} (${MARKER_MAP[used.id].name})`;
-            const vFov = 2*Math.atan((video.videoHeight/2)/focalPx)*180/Math.PI;
+            DOM.iId.textContent = `${used.id} (${MARKER_MAP[used.id].name})`;
+            const vFov = 2 * Math.atan(halfH / focalPx) * 180 / Math.PI;
             if (Math.abs(cam3.fov - vFov) > 0.5) {
-              cam3.fov = vFov; cam3.updateProjectionMatrix();
+              cam3.fov = vFov;
+              cam3.updateProjectionMatrix();
             }
           }
-        } catch(e) {}
+        } catch (e) {
+          console.warn('[VIO] posit pose failed:', e);
+        }
       }
     }
   }
 
-  // ── OPTICAL FLOW TRACKING ──
-  let trackedFeatures = [];
-  let flowVectors = [];
-  if (STATE.prevGray && STATE.features.length > 0) {
-    const tracked = trackLK(STATE.prevGray, gray, STATE.features, OF_W, OF_H, {
-      winRadius:4, maxIter:8, maxResidual:40
-    });
+  // ── Optical flow tracking ───────────────────────────────────────
+  _flowVectors.length = 0;
+  let trackedFeatures = STATE.features; // default
+  if (STATE.grayPrev && STATE.features.length > 0) {
+    trackLK(STATE.grayPrev, STATE.grayCur, STATE.features,
+            STATE.OF_W, STATE.OF_H, _trackLKOut);
     const next = [];
-    for (let i = 0; i < tracked.length; i++) {
-      if (tracked[i].ok) {
-        const old = STATE.features[i];
-        const du = tracked[i].x - old.x;
-        const dv = tracked[i].y - old.y;
-        // Pixel coords relative to image center (for translation estimation)
-        flowVectors.push({
-          u: old.x - OF_W/2,
-          v: old.y - OF_H/2,
-          du, dv
-        });
-        next.push({ x: tracked[i].x, y: tracked[i].y, age: (old.age||0)+1 });
-      }
+    for (let i = 0; i < _trackLKOut.length; i++) {
+      const t = _trackLKOut[i];
+      if (!t.ok) continue;
+      const old = STATE.features[i];
+      const du  = t.x - old.x;
+      const dv  = t.y - old.y;
+      // Push old position into trail BEFORE we overwrite
+      pushTrail(old, old.x, old.y);
+      // Reuse feature object — mutate in place (avoid alloc)
+      old.x = t.x; old.y = t.y;
+      old.age = (old.age | 0) + 1;
+      next.push(old);
+      const fv = getFlowVecSlot(_flowVectors.length, _flowVectorPool);
+      fv.u  = old.x - du - STATE.OF_W / 2; // old position in centre-relative coords
+      fv.v  = old.y - dv - STATE.OF_H / 2;
+      fv.du = du;
+      fv.dv = dv;
+      _flowVectors.push(fv);
     }
     trackedFeatures = next;
   }
   STATE.features = trackedFeatures;
 
-  // Re-detect periodically or when low
-  STATE.redetectCounter++;
-  if (STATE.features.length < 30 || STATE.redetectCounter >= 30) {
-    STATE.redetectCounter = 0;
-    const newSet = detectFeatures(gray);
-    const md2 = 14*14;
-    for (const nf of newSet) {
-      let tc = false;
-      for (const ef of STATE.features) {
-        const dx=nf.x-ef.x, dy=nf.y-ef.y;
-        if (dx*dx+dy*dy < md2) { tc=true; break; }
+  // ── Re-detect features periodically or when too few ─────────────
+  STATE.redetectCtr++;
+  if (STATE.features.length < CONFIG.MIN_FEATURES_TRIGGER ||
+      STATE.redetectCtr >= CONFIG.REDETECT_PERIOD) {
+    STATE.redetectCtr = 0;
+    const newSet = detectFeatures(STATE.grayCur);
+    const md2 = CONFIG.FEATURE_MIN_DIST_PX * CONFIG.FEATURE_MIN_DIST_PX;
+    for (let i = 0; i < newSet.length; i++) {
+      if (STATE.features.length >= CONFIG.MAX_FEATURES) break;
+      const nf = newSet[i];
+      let tooClose = false;
+      for (let j = 0; j < STATE.features.length; j++) {
+        const ef = STATE.features[j];
+        const dx = nf.x - ef.x, dy = nf.y - ef.y;
+        if (dx * dx + dy * dy < md2) { tooClose = true; break; }
       }
-      if (!tc && STATE.features.length < 80) STATE.features.push(nf);
+      if (!tooClose) STATE.features.push(nf);
     }
   }
 
-  // ── ESTIMATE CAMERA TRANSLATION ──
-  if (ANCHOR.set && flowVectors.length > 8 && STATE.prevImuQuat && IMU.ready) {
-    const focalPx = video.videoWidth * 0.85;
-    const curImuQuat = imuToCamQuat();
+  // ── Estimate camera translation (IMU-derotated optical flow) ────
+  if (ANCHOR.set && _flowVectors.length > 8 && STATE.prevImuQuat && IMU.ready) {
+    const focalPx = video.videoWidth * CONFIG.FOCAL_FACTOR;
+    imuToCamQuat(_S.qCam);
+    _S.qDelta.copy(_S.qCam).multiply(_S.q2.copy(STATE.prevImuQuat).invert());
 
-    // Subtract rotation-induced flow
-    const deltaQ = curImuQuat.clone().multiply(STATE.prevImuQuat.clone().invert());
-    const residualFlow = [];
-    for (const fv of flowVectors) {
-      const expected = rotationFlowAtPoint(fv.u, fv.v, focalPx, deltaQ);
-      if (!expected) continue;
-      // Expected NEW pixel position is expected.u/v. Original was (fv.u, fv.v).
-      // So expected du = expected.u - fv.u
-      const rotDu = expected.u - fv.u;
-      const rotDv = expected.v - fv.v;
-      residualFlow.push({
-        u: fv.u, v: fv.v,
-        du: fv.du - rotDu,
-        dv: fv.dv - rotDv,
-      });
+    _residualFlow.length = 0;
+    for (let i = 0; i < _flowVectors.length; i++) {
+      const fv = _flowVectors[i];
+      const r = rotationFlowAtPoint(fv.u, fv.v, focalPx, _S.qDelta, _S.rotOut);
+      if (!r.ok) continue;
+      const rotDu = r.u - fv.u;
+      const rotDv = r.v - fv.v;
+      const slot = getFlowVecSlot(_residualFlow.length, _flowVectorPool);
+      slot.u  = fv.u;
+      slot.v  = fv.v;
+      slot.du = fv.du - rotDu;
+      slot.dv = fv.dv - rotDv;
+      _residualFlow.push(slot);
     }
 
-    const trans = computeTranslationFromFlow(residualFlow, focalPx);
-    if (trans) {
-      const transVec = new THREE.Vector3(trans.dx, trans.dy, trans.dz);
-      transVec.applyQuaternion(curImuQuat);
-      // Clamp implausibly large jumps (>20cm/frame)
-      if (transVec.length() < 0.2) {
-        // Apply to both current and target — OF drives the camera forward,
-        // soft re-anchor only fights it when a marker disagrees.
-        ANCHOR.camPos.add(transVec);
-        ANCHOR.targetCamPos.add(transVec);
-        // Accumulate estimated drift (used to decay trust)
-        TRACK.driftMeters += transVec.length();
-        TRACK.lastFlowOkT = performance.now();
+    const tr = computeTranslationFromFlow(_residualFlow, focalPx, _S.transOut);
+    if (tr.ok) {
+      _S.v4.set(tr.dx, tr.dy, tr.dz).applyQuaternion(_S.qCam);
+      const len = _S.v4.length();
+      if (len < CONFIG.TRANS_CLAMP_M) {
+        ANCHOR.camPos.add(_S.v4);
+        ANCHOR.targetCamPos.add(_S.v4);
+        TRACK.driftMeters += len;
+        TRACK.lastFlowOkT  = performance.now();
       }
-      document.getElementById('i-trans').textContent =
-        `Δx${trans.dx.toFixed(3)} Δy${trans.dy.toFixed(3)}`;
+      DOM.iTrans.textContent = `Δx${tr.dx.toFixed(3)} Δy${tr.dy.toFixed(3)}`;
     }
   }
-  STATE.prevImuQuat = IMU.ready ? imuToCamQuat() : null;
+  // Snapshot current IMU quat for next tick's delta (allocate ONCE then reuse)
+  if (IMU.ready) {
+    if (!STATE.prevImuQuat) STATE.prevImuQuat = new THREE.Quaternion();
+    imuToCamQuat(STATE.prevImuQuat);
+  }
 
-  // ── TRACKING QUALITY UPDATE (Step O) ──
+  // ── Tracking quality classifier ─────────────────────────────────
   updateTrackingQuality(now);
 
-  // ── UPDATE CAMERA ──
+  // ── Camera update + render ──────────────────────────────────────
   updateCamera();
-
-  // ── RENDER ──
-  const T = getCoverTransform(video.videoWidth, video.videoHeight);
-  draw2D(markers, STATE.features, T);
+  getCoverTransform(video.videoWidth, video.videoHeight, _T_OUT);
+  draw2D(markers, STATE.features, _T_OUT);
   renderer.render(scene, cam3);
 
-  STATE.prevGray = gray;
+  // ── Swap gray buffers (zero-alloc double buffer) ────────────────
+  const tmp = STATE.grayPrev;
+  STATE.grayPrev = STATE.grayCur;
+  STATE.grayCur  = tmp || new Float32Array(STATE.OF_W * STATE.OF_H);
 
-  // ── UI ──
-  document.getElementById('i-of').textContent = STATE.features.length;
-  document.getElementById('i-pos').textContent =
-    `${ANCHOR.camPos.x.toFixed(2)} ${ANCHOR.camPos.y.toFixed(2)} ${ANCHOR.camPos.z.toFixed(2)}`;
-  document.getElementById('i-state').textContent = TRACK.state.toUpperCase();
-  document.getElementById('i-trust').textContent = (TRACK.trustScore * 100).toFixed(0) + '%';
-  document.getElementById('i-drift').textContent = TRACK.driftMeters.toFixed(2) + ' m';
+  // ── Status / UI ─────────────────────────────────────────────────
+  DOM.iOf.textContent    = STATE.features.length;
+  DOM.iPos.textContent   = `${ANCHOR.camPos.x.toFixed(2)} ${ANCHOR.camPos.y.toFixed(2)} ${ANCHOR.camPos.z.toFixed(2)}`;
+  DOM.iState.textContent = TRACK.state.toUpperCase();
+  DOM.iTrust.textContent = `${(TRACK.trustScore * 100).toFixed(0)}%`;
+  DOM.iDrift.textContent = `${TRACK.driftMeters.toFixed(2)} m`;
   if (!ANCHOR.set) setStatus('Inquadra un marker per ancorare', 'searching');
-  // (when ANCHOR.set, setStatus is already called by applyTrackingVisuals)
 
-  STATE.frames++;
-  if (now - STATE.fpsT > 1000) {
-    STATE.fps = STATE.frames; STATE.frames = 0; STATE.fpsT = now;
-    document.getElementById('i-fps').textContent = STATE.fps;
+  STATE.fpsFrames++;
+  if (now - STATE.fpsAccumT > 1000) {
+    STATE.fps = STATE.fpsFrames;
+    STATE.fpsFrames = 0;
+    STATE.fpsAccumT = now;
+    DOM.iFps.textContent = STATE.fps;
   }
 }
 
-// ═══════════════════════════════════════════════
-// BOOT
-// ═══════════════════════════════════════════════
-document.getElementById('btn-start').addEventListener('click', async () => {
-  const sizeMm = parseFloat(document.getElementById('marker-size').value);
-  if (sizeMm > 0) MARKER_SIZE_M = sizeMm / 1000;
-  document.getElementById('splash').style.display = 'none';
+/* ════════════════════════════════════════════════════════════════════
+   PHASE 4 — DOM EVENT LISTENERS & HARDWARE LIFECYCLE HOOKS
+   --------------------------------------------------------------------
+   Camera / IMU lifecycle, error funnels, viewport resize, UI toggles.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── Camera lifecycle with granular error handling ──────────────── */
+async function startCamera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showFatal('Camera non disponibile',
+      'Il browser non espone navigator.mediaDevices.getUserMedia. Apri la pagina in HTTPS o in un browser più recente.',
+      'getUserMedia missing');
+    return false;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: 'environment',
+        width:  { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+      audio: false,
+    });
+    DOM.video.srcObject = stream;
+    await DOM.video.play();
+    STATE.camOk = true;
+    STATE.OF_H  = Math.round(STATE.OF_W * DOM.video.videoHeight / DOM.video.videoWidth);
+    DOM.work.width = STATE.OF_W;
+    DOM.work.height = STATE.OF_H;
+
+    // Allocate gray buffers ONCE — reused for the life of the session
+    const totalPx = STATE.OF_W * STATE.OF_H;
+    STATE.grayCur  = new Float32Array(totalPx);
+    STATE.grayPrev = null; // first frame has no predecessor
+
+    // Detect track end (camera revoked at runtime)
+    const track = stream.getVideoTracks()[0];
+    if (track) {
+      track.addEventListener('ended', () => {
+        STATE.camOk = false;
+        setStatus('Camera disconnessa', 'lost');
+      });
+    }
+    return true;
+  } catch (e) {
+    const name = (e && e.name) || 'UnknownError';
+    let msg, hint;
+    switch (name) {
+      case 'NotAllowedError':
+      case 'SecurityError':
+        msg  = 'Accesso alla camera negato.';
+        hint = 'Autorizza la fotocamera nelle impostazioni del browser per questo sito e ricarica la pagina.';
+        break;
+      case 'NotFoundError':
+      case 'OverconstrainedError':
+        msg  = 'Nessuna fotocamera adatta trovata.';
+        hint = 'Verifica che il dispositivo abbia una fotocamera posteriore disponibile.';
+        break;
+      case 'NotReadableError':
+      case 'TrackStartError':
+        msg  = 'La fotocamera è già in uso da un\'altra app.';
+        hint = 'Chiudi le altre app che usano la camera e riprova.';
+        break;
+      case 'AbortError':
+        msg  = 'Avvio della fotocamera interrotto.';
+        hint = 'Riprova.';
+        break;
+      default:
+        msg  = `Errore camera (${name}).`;
+        hint = (e && e.message) ? e.message : '';
+    }
+    showFatal('Camera bloccata', msg, hint);
+    setStatus('Camera non disponibile', 'lost');
+    return false;
+  }
+}
+
+/* ── IMU permission flow (iOS 13+ needs explicit user gesture) ──── */
+function onOrientation(e) {
+  if (e.alpha === null && e.beta === null) return;
+  IMU.a = e.alpha || 0;
+  IMU.b = e.beta  || 0;
+  IMU.g = e.gamma || 0;
+  IMU.ready = true;
+}
+
+async function requestGyro() {
+  if (typeof DeviceOrientationEvent === 'undefined') {
+    setStatus('Giroscopio non supportato', 'lost');
+    return false;
+  }
+  const needsPerm = typeof DeviceOrientationEvent.requestPermission === 'function';
+  if (needsPerm) {
+    try {
+      const r = await DeviceOrientationEvent.requestPermission();
+      if (r !== 'granted') {
+        setStatus('Giroscopio negato — tracking limitato', 'degraded');
+        return false;
+      }
+    } catch (e) {
+      setStatus('Errore permessi giroscopio', 'lost');
+      console.warn('[VIO] gyro permission error:', e);
+      return false;
+    }
+  }
+  window.addEventListener('deviceorientation', onOrientation, true);
+  return true;
+}
+
+/* ── Resize / orientation change ────────────────────────────────── */
+function onResize() {
+  if (cam3 && renderer) {
+    cam3.aspect = window.innerWidth / window.innerHeight;
+    cam3.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight, false);
+  }
+  resizeOverlay();
+}
+window.addEventListener('resize', onResize);
+window.addEventListener('orientationchange', () => setTimeout(onResize, 200));
+
+/* ── Page lifecycle — pause tracking when tab hidden ────────────── */
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (DOM.video && DOM.video.srcObject) {
+      // Don't stop — just note. Browser may already throttle rAF.
+      console.info('[VIO] visibility hidden — rAF will throttle');
+    }
+  }
+});
+
+/* ── UI toggle helpers ──────────────────────────────────────────── */
+function toggleFlag(flagName, btn) {
+  STATE[flagName] = !STATE[flagName];
+  btn.classList.toggle('on', STATE[flagName]);
+}
+
+DOM.tbOf.addEventListener('click',      () => toggleFlag('showOF',      DOM.tbOf));
+DOM.tbTrail.addEventListener('click',   () => toggleFlag('showTrail',   DOM.tbTrail));
+DOM.tbMarkers.addEventListener('click', () => toggleFlag('showMarkers', DOM.tbMarkers));
+
+DOM.tbReanchor.addEventListener('click', () => {
+  ANCHOR.set = false;
+  ANCHOR.camPos.set(0, 0, 0);
+  ANCHOR.targetCamPos.set(0, 0, 0);
+  ANCHOR.lastMarkerT = 0;
+  TRACK.driftMeters = 0;
+  TRACK.trustScore  = 1.0;
+  TRACK.state = 'init';
+  TRACK.lastFlowOkT = 0;
+  // Reset all feature trails so the visualization doesn't drift across re-anchors
+  for (let i = 0; i < STATE.features.length; i++) STATE.features[i].trailLen = 0;
+  if (modelGroup) modelGroup.visible = false;
+  setStatus('Re-anchor: inquadra di nuovo un marker', 'searching');
+});
+
+/* ── BOOT flow ──────────────────────────────────────────────────── */
+DOM.btnStart.addEventListener('click', async () => {
+  // Validate user input
+  const rawMm = parseFloat(DOM.markerSize.value);
+  if (Number.isFinite(rawMm) && rawMm > 0) {
+    STATE.markerSizeM = rawMm / 1000;
+  }
+
+  // Verify libraries loaded
+  if (typeof AR === 'undefined' || typeof POS === 'undefined' || typeof THREE === 'undefined') {
+    showFatal('Libreria mancante',
+      'Una libreria di base non è stata caricata (AR / POS / THREE).',
+      'Verifica la connessione e ricarica.');
+    return;
+  }
+
+  DOM.splash.classList.add('hidden');
   resizeOverlay();
 
-  if (typeof AR === 'undefined' || typeof POS === 'undefined' || typeof THREE === 'undefined') {
-    setStatus('ERR libreria non caricata'); return;
-  }
   detector = new AR.Detector();
-  initThree();
-  const ok = await startCamera();
-  if (!ok) return;
+  if (!initThree()) return;
+  const camOk = await startCamera();
+  if (!camOk) return;
 
-  const needsPerm = typeof DeviceOrientationEvent !== 'undefined' &&
-                    typeof DeviceOrientationEvent.requestPermission === 'function';
-  if (needsPerm) {
-    document.getElementById('perm-modal').classList.add('show');
+  // iOS gyro permission flow
+  const iosGate = typeof DeviceOrientationEvent !== 'undefined' &&
+                  typeof DeviceOrientationEvent.requestPermission === 'function';
+  if (iosGate) {
+    DOM.permModal.classList.remove('hidden');
   } else {
     await requestGyro();
     setStatus('Inquadra un marker per ancorare', 'searching');
@@ -3006,29 +3605,19 @@ document.getElementById('btn-start').addEventListener('click', async () => {
   requestAnimationFrame(loop);
 });
 
-document.getElementById('btn-gyro').addEventListener('click', async () => {
-  document.getElementById('perm-modal').classList.remove('show');
+DOM.btnGyro.addEventListener('click', async () => {
+  DOM.permModal.classList.add('hidden');
   const ok = await requestGyro();
-  setStatus(ok ? 'Inquadra un marker per ancorare' : 'Giroscopio negato', ok?'searching':'searching');
+  setStatus(ok ? 'Inquadra un marker per ancorare' : 'Giroscopio negato — tracking limitato',
+            ok ? 'searching' : 'degraded');
 });
 
-document.getElementById('tb-of').addEventListener('click', () => {
-  STATE.showOF = !STATE.showOF;
-  document.getElementById('tb-of').classList.toggle('on', STATE.showOF);
+/* ── Global error funnel — never let an unhandled error die silent ─ */
+window.addEventListener('error', (ev) => {
+  console.error('[VIO] uncaught:', ev.error || ev.message);
 });
-document.getElementById('tb-markers').addEventListener('click', () => {
-  STATE.showMarkers = !STATE.showMarkers;
-  document.getElementById('tb-markers').classList.toggle('on', STATE.showMarkers);
-});
-document.getElementById('tb-reanchor').addEventListener('click', () => {
-  ANCHOR.set = false;
-  ANCHOR.camPos.set(0,0,0);
-  ANCHOR.targetCamPos.set(0,0,0);
-  TRACK.driftMeters = 0;
-  TRACK.trustScore = 1.0;
-  TRACK.state = 'init';
-  modelGroup.visible = false;
-  setStatus('Re-anchor: inquadra di nuovo un marker', 'searching');
+window.addEventListener('unhandledrejection', (ev) => {
+  console.error('[VIO] unhandled rejection:', ev.reason);
 });
 </script>
 </body>
